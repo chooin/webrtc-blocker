@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { normalizeHost } from '../core/whitelist';
 import { readCount } from '../background/counter';
 import { getSettings, saveSettings } from '../shared/settings';
+import { readSyncError } from '../shared/sync-error';
 import { App, type PopupApi } from './App';
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -17,6 +18,7 @@ const api: PopupApi = {
     const id = (await activeTab())?.id;
     return id === undefined ? 0 : readCount(id, chrome.storage.session);
   },
+  getSyncError: () => readSyncError(chrome.storage.session),
 };
 
 const container = document.getElementById('root');

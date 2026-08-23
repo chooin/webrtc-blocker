@@ -4,7 +4,12 @@ import userEvent from '@testing-library/user-event';
 import type { Settings } from '../core/types';
 import { App, type PopupApi } from './App';
 
-function fakeApi(overrides: Partial<Settings> = {}, host = 'example.com', count = 0) {
+function fakeApi(
+  overrides: Partial<Settings> = {},
+  host = 'example.com',
+  count = 0,
+  syncError: string | null = null,
+) {
   let settings: Settings = { enabled: true, blockMedia: false, whitelist: [], ...overrides };
   const saved: Partial<Settings>[] = [];
   const api: PopupApi = {
@@ -16,6 +21,7 @@ function fakeApi(overrides: Partial<Settings> = {}, host = 'example.com', count 
     },
     getActiveHost: async () => host,
     getBlockedCount: async () => count,
+    getSyncError: async () => syncError,
   };
   return { api, saved, current: () => settings };
 }
@@ -92,5 +98,64 @@ describe('App', () => {
     // 必须先等载入完成再断言，否则"还在显示载入中"也会让这条用例通过，等于没测到。
     await screen.findByLabelText('启用 WebRTC 拦截');
     expect(screen.queryByRole('button', { name: '放行本站' })).toBeNull();
+  });
+});
+
+/**
+ * popup 的拦截状态是从设置推导的。注册同步失败时扩展其实没有在拦截，
+ * 而界面会照常显示「已拦截」——静默失败叠加错误汇报是最坏的一种状态。
+ * 这一组用例保证那种状态一定会被摆到用户面前。
+ */
+describe('App 的失败提示', () => {
+  it('注册同步失败时给出显眼的警告横幅', async () => {
+    const { api } = fakeApi({}, 'example.com', 0, 'PARSE_ERROR_INVALID_HOST_WILDCARD');
+    render(<App api={api} />);
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('拦截未生效');
+    expect(banner.textContent).toContain('PARSE_ERROR_INVALID_HOST_WILDCARD');
+  });
+
+  it('没有失败时不出现警告横幅', async () => {
+    const { api } = fakeApi();
+    render(<App api={api} />);
+    // 同样要先等载入完成，否则"还在载入"也能让断言通过。
+    await screen.findByLabelText('启用 WebRTC 拦截');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('载入失败时把原因摆出来，而不是永远卡在载入中', async () => {
+    const { api } = fakeApi();
+    const failing: PopupApi = {
+      ...api,
+      getSettings: async () => {
+        throw new Error('storage 读取失败');
+      },
+    };
+    render(<App api={failing} />);
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('storage 读取失败');
+    expect(screen.queryByText('载入中…')).toBeNull();
+  });
+
+  it('保存失败时把原因摆出来，而不是只留在控制台里', async () => {
+    const { api } = fakeApi();
+    const failing: PopupApi = {
+      ...api,
+      saveSettings: async () => {
+        throw new Error('storage 写入失败');
+      },
+    };
+    render(<App api={failing} />);
+    await userEvent.click(await screen.findByLabelText('启用 WebRTC 拦截'));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('storage 写入失败');
+  });
+
+  it('保存成功后警告横幅消失', async () => {
+    const { api } = fakeApi({}, 'example.com', 0, '旧的失败');
+    render(<App api={api} />);
+    await screen.findByRole('alert');
+    await userEvent.click(await screen.findByLabelText('同时拦截摄像头与麦克风'));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
 });

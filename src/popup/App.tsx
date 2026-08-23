@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Settings } from '../core/types';
 import { addToWhitelist, isWhitelisted, removeFromWhitelist } from '../core/whitelist';
+import { errorMessage } from '../shared/sync-error';
 import './style.css';
 
 export interface PopupApi {
@@ -8,25 +9,36 @@ export interface PopupApi {
   saveSettings(patch: Partial<Settings>): Promise<Settings>;
   getActiveHost(): Promise<string>;
   getBlockedCount(): Promise<number>;
+  /** Service Worker 最近一次注册同步的失败原因；没有失败时为 null。 */
+  getSyncError(): Promise<string | null>;
 }
 
 export function App({ api }: { api: PopupApi }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [host, setHost] = useState('');
   const [count, setCount] = useState(0);
+  const [warning, setWarning] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [loaded, activeHost, blocked] = await Promise.all([
-        api.getSettings(),
-        api.getActiveHost(),
-        api.getBlockedCount(),
-      ]);
-      if (!alive) return;
-      setSettings(loaded);
-      setHost(activeHost);
-      setCount(blocked);
+      try {
+        const [loaded, activeHost, blocked, syncError] = await Promise.all([
+          api.getSettings(),
+          api.getActiveHost(),
+          api.getBlockedCount(),
+          api.getSyncError(),
+        ]);
+        if (!alive) return;
+        setSettings(loaded);
+        setHost(activeHost);
+        setCount(blocked);
+        setWarning(syncError === null ? null : `拦截未生效：${syncError}`);
+      } catch (error) {
+        // 没有兜底的话，一次拒绝就把 popup 永久钉在「载入中…」上，用户只会以为它卡了。
+        if (!alive) return;
+        setWarning(`拦截状态未知：读取扩展状态失败（${errorMessage(error)}）`);
+      }
     })();
     return () => {
       alive = false;
@@ -35,17 +47,40 @@ export function App({ api }: { api: PopupApi }) {
 
   const update = useCallback(
     async (patch: Partial<Settings>) => {
-      setSettings(await api.saveSettings(patch));
+      try {
+        setSettings(await api.saveSettings(patch));
+        setWarning(null);
+      } catch (error) {
+        setWarning(`设置未能保存：${errorMessage(error)}`);
+      }
     },
     [api],
   );
 
-  if (settings === null) return <main className="popup">载入中…</main>;
+  // 这是「扩展没有在保护你」的状态，必须一眼可见，不能只留在控制台里。
+  const banner =
+    warning === null ? null : (
+      <p className="warning" role="alert">
+        <span aria-hidden="true">⚠️ </span>
+        {warning}
+      </p>
+    );
+
+  if (settings === null) {
+    return (
+      <main className="popup">
+        {banner}
+        {warning === null && <p>载入中…</p>}
+      </main>
+    );
+  }
 
   const allowed = !settings.enabled || (host !== '' && isWhitelisted(host, settings.whitelist));
 
   return (
     <main className="popup">
+      {banner}
+
       <label className="row">
         <input
           type="checkbox"

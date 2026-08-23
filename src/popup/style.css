@@ -45,3 +45,18 @@
   font-size: 12px;
   opacity: 0.75;
 }
+
+/* 「扩展没有在保护你」的状态，配色要压过界面上其它一切。 */
+.warning {
+  padding: 8px 10px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #7f1d1d;
+  background: #fdecea;
+  border: 1px solid #c0392b;
+  border-left-width: 4px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
