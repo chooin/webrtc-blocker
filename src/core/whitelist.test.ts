@@ -54,6 +54,12 @@ describe('normalizeHost', () => {
     expect(normalizeHost('xn--fsqu00a.xn--0zwm56d')).toBe('xn--fsqu00a.xn--0zwm56d');
     expect(normalizeHost('localhost')).toBe('localhost');
   });
+
+  // 下划线不合法 DNS 语法，但内网主机名常见，且不是 match pattern 元字符，
+  // 放行它不产生旁路风险——之前误把它当成通配符类字符一并拒绝了。
+  it('主机名里的下划线放行', () => {
+    expect(normalizeHost('my_server.local')).toBe('my_server.local');
+  });
 });
 
 describe('isWhitelisted', () => {
@@ -125,5 +131,23 @@ describe('toExcludeMatches', () => {
     expect(toExcludeMatches(['*'])).toEqual([]);
     expect(toExcludeMatches(['*.example.com'])).toEqual([]);
     expect(toExcludeMatches(['*', 'a.com'])).toEqual(['*://a.com/*', '*://*.a.com/*']);
+  });
+
+  // IP 没有子域概念，`*://*.192.168.1.1/*` 这种子域通配 Chromium 未必接受，
+  // 一旦被拒会带垮整个 registerContentScripts 调用，所以对 IP 只发精确匹配。
+  it('IPv4 字面量只产出精确匹配，不追加子域通配', () => {
+    expect(toExcludeMatches(['192.168.1.1'])).toEqual(['*://192.168.1.1/*']);
+  });
+
+  it('IPv6 字面量只产出精确匹配，不追加子域通配', () => {
+    expect(toExcludeMatches(['[::1]'])).toEqual(['*://[::1]/*']);
+  });
+
+  it('IP 与真实域名混合时，只有域名条目获得子域通配', () => {
+    expect(toExcludeMatches(['192.168.1.1', 'example.com'])).toEqual([
+      '*://192.168.1.1/*',
+      '*://example.com/*',
+      '*://*.example.com/*',
+    ]);
   });
 });

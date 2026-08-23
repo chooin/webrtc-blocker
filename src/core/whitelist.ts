@@ -1,5 +1,10 @@
-/** 单个 DNS 标签：字母数字开头结尾，中间可含连字符。也覆盖 punycode 与 IPv4 段。 */
-const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+/**
+ * 单个 DNS 标签：字母数字或下划线开头结尾，中间可含连字符或下划线。
+ * 也覆盖 punycode 与 IPv4 段。
+ * 下划线不合法 DNS 语法，但内网主机名常见（如 `my_server`），
+ * 且它不是 Chrome match pattern 的元字符——放行它不产生任何旁路风险。
+ */
+const DNS_LABEL = /^[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?$/;
 
 /** URL 解析已经保证方括号里是合法 IPv6，这里只需确认它确实是那个形状。 */
 const IPV6_LITERAL = /^\[[0-9a-f:.]+\]$/;
@@ -19,8 +24,6 @@ const IPV6_LITERAL = /^\[[0-9a-f:.]+\]$/;
 function isPlainHostname(host: string): boolean {
   if (host === '' || host.length > 253) return false;
   if (IPV6_LITERAL.test(host)) return true;
-  // 刻意不接受下划线等 DNS 里少见的字符：宁可少放行一个内网域名，
-  // 也不把没验证过的字符送进 match pattern。
   return host.split('.').every((label) => label.length <= 63 && DNS_LABEL.test(label));
 }
 
@@ -77,15 +80,28 @@ export function removeFromWhitelist(whitelist: readonly string[], host: string):
   return canonicalize(whitelist).filter((h) => h !== w);
 }
 
+/** 归一化后的 host 是不是 IP 字面量（IPv4 点分十进制或方括号包裹的 IPv6）。 */
+function isIpLiteral(host: string): boolean {
+  if (IPV6_LITERAL.test(host)) return true;
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+}
+
 /**
  * Chromium 的 `*.example.com` 主机模式据文档亦匹配 example.com 本身，
  * 两条模式存在冗余。此处刻意保留：冗余无副作用，而一旦该行为与文档不符，
  * 白名单静默失效的代价远高于多写一条模式。
+ *
+ * IP 字面量是例外：`*://*.192.168.1.1/*` 或 `*://*.[::1]/*` 是给 IP 地址加
+ * 子域通配，这种形状 Chromium 的 match pattern 解析器未必接受，一旦被拒，
+ * 拒的不是这一条模式，而是整个 registerContentScripts 调用——参见上面
+ * isPlainHostname 文档里 `*.a.com` 那一条同类风险。IP 没有子域概念，
+ * 少这一条模式不丢失任何覆盖范围，所以对 IP 只发出精确匹配。
  */
 export function toExcludeMatches(whitelist: readonly string[]): string[] {
   const out: string[] = [];
   for (const w of canonicalize(whitelist)) {
-    out.push(`*://${w}/*`, `*://*.${w}/*`);
+    out.push(`*://${w}/*`);
+    if (!isIpLiteral(w)) out.push(`*://*.${w}/*`);
   }
   return out;
 }
