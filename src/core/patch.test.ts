@@ -7,7 +7,8 @@ class FakePeerConnection {
 
 function makeTarget(): Record<string, unknown> {
   const target: Record<string, unknown> = {};
-  for (const key of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) {
+  // RTCPeerConnection and webkitRTCPeerConnection with enumerable: false
+  for (const key of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
     Object.defineProperty(target, key, {
       value: FakePeerConnection,
       writable: true,
@@ -15,6 +16,13 @@ function makeTarget(): Record<string, unknown> {
       configurable: true,
     });
   }
+  // RTCDataChannel with enumerable: true to test enumerable preservation in both directions
+  Object.defineProperty(target, 'RTCDataChannel', {
+    value: FakePeerConnection,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
   return target;
 }
 
@@ -61,7 +69,10 @@ describe('installRtcBlocker', () => {
   it('保留原属性的 enumerable 特性', () => {
     const target = makeTarget();
     installRtcBlocker(target);
+    // RTCPeerConnection was enumerable: false, should stay false
     expect(Object.getOwnPropertyDescriptor(target, 'RTCPeerConnection')?.enumerable).toBe(false);
+    // RTCDataChannel was enumerable: true, should stay true
+    expect(Object.getOwnPropertyDescriptor(target, 'RTCDataChannel')?.enumerable).toBe(true);
   });
 
   it('重复调用幂等：不抛错、不二次包装', () => {
@@ -93,6 +104,9 @@ describe('installRtcBlocker', () => {
       throw new Error('遥测炸了');
     });
     const Blocked = target.RTCPeerConnection as new () => unknown;
-    expect(() => new Blocked()).toThrow();
+    // Must throw TypeError (not the reporter's Error)
+    expect(() => new Blocked()).toThrow(TypeError);
+    // Must have the correct blocking message, not the reporter's message
+    expect(() => new Blocked()).toThrow(/WebRTC is disabled/);
   });
 });
