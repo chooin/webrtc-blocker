@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { access, cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -27,6 +27,19 @@ const iifeTargets = [
   { entry: 'src/injected/media.ts', out: MEDIA_SCRIPT_FILE },
   { entry: 'src/relay/isolated.ts', out: manifest.content_scripts[0].js[0] },
 ];
+
+/**
+ * 注入脚本刻意保持未压缩（见 buildIife 里的注释）：能被人逐行读懂，
+ * 本身就是这个隐私扩展值得信任的理由之一。压缩第一步就是把注释全部剥掉，
+ * 所以拿源码里一条独有注释去产物里核对"还在不在"，
+ * 是判断"有没有被后续改动悄悄压缩"最省事、也最不会误报的办法。
+ * 三条注释分别只出现在各自产物里（已用构建产物核对过），换目标文件时要跟着换。
+ */
+const UNMINIFIED_MARKERS = {
+  [RTC_SCRIPT_FILE]: '幂等标记必须放在闭包里',
+  [MEDIA_SCRIPT_FILE]: '模仿"用户拒绝授权"',
+  [manifest.content_scripts[0].js[0]]: '这条消息来自 MAIN world',
+};
 
 async function writeManifest() {
   await mkdir(outDir, { recursive: true });
@@ -133,6 +146,21 @@ async function assertArtifacts() {
   );
 }
 
+/** 见 UNMINIFIED_MARKERS 上的说明：这里只是逐个核对标记注释是否还在产物里。 */
+async function assertInjectedScriptsUnminified() {
+  const minified = [];
+  for (const [file, marker] of Object.entries(UNMINIFIED_MARKERS)) {
+    const content = await readFile(resolve(outDir, file), 'utf8');
+    if (!content.includes(marker)) minified.push(file);
+  }
+
+  assert.deepEqual(
+    minified,
+    [],
+    `注入/中继脚本疑似被压缩，源码注释已丢失——这些文件必须保持可读：${minified.join(', ')}`,
+  );
+}
+
 if (!watch) {
   await rm(outDir, { recursive: true, force: true });
 }
@@ -145,5 +173,6 @@ for (const target of iifeTargets) {
 // watch 模式下构建是持续进行的，此时断言没有意义。
 if (!watch) {
   await assertArtifacts();
-  console.log('产物校验通过：manifest 与注册策略引用的文件都已生成。');
+  await assertInjectedScriptsUnminified();
+  console.log('产物校验通过：manifest 与注册策略引用的文件都已生成，注入脚本仍保持未压缩可读。');
 }
