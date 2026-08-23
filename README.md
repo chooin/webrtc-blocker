@@ -12,6 +12,10 @@ Chromium（Chrome / Edge）Manifest V3 扩展。安装后默认阻断所有页�
     pnpm test         # Vitest
     pnpm typecheck    # tsc --noEmit
 
+图标是脚本生成后提交进仓库的，只有需要改图形时才重新跑：
+
+    node scripts/make-icons.mjs   # 重新生成 src/icons/icon-{16,32,48,128}.png
+
 在 `chrome://extensions` 开启开发者模式，「加载已解压的扩展程序」选择 `dist/` 目录。
 
 ## 工作原理
@@ -34,8 +38,29 @@ Service Worker 依据设置，用 `chrome.scripting.registerContentScripts` 决�
 
 ## 手动验收
 
-见下方清单。逃逸测试页：
+先起一个本地服务器提供逃逸测试页——**必须走 `http://localhost`**，
+因为 `navigator.mediaDevices` 只存在于安全上下文，用 `file://` 打开会让 `getUserMedia`
+那一行无条件显示「已拦截」，失去判别力：
 
     python3 -m http.server 8765 -d test-pages
 
-然后访问 http://localhost:8765/escape.html
+然后访问 <http://localhost:8765/escape.html>。
+
+逐条走下面十步（与设计文档 §15 一致）：
+
+1. 默认状态下打开一个公开 WebRTC 测试页，确认无法获取 ICE 候选、控制台可见构造函数抛错。
+2. 打开上面的逃逸测试页（动态创建 `about:blank` 与 `srcdoc` iframe 后取 `contentWindow.RTCPeerConnection`），确认同样被拦截。
+3. 将该站点加入白名单，刷新后确认 WebRTC 立即恢复正常，且页面初始化过程中无失败迹象。
+4. 移出白名单，刷新后确认恢复拦截。
+5. 关闭总开关，确认全站 WebRTC 恢复正常；并在 SW 控制台执行 `chrome.privacy.network.webRTCIPHandlingPolicy.get({})` 确认取值已回到 `default`（该设置在 `chrome://settings` 界面中不可见，只能通过 API 读回）。
+6. 打开媒体开关，确认网页摄像头/麦克风请求被拒绝且站点显示「权限被拒绝」类提示。
+7. 关闭媒体开关，确认摄像头恢复可用，而 WebRTC 仍被拦截。
+8. 更新扩展（重新加载已解压扩展）后，确认注册状态正确、无重复或失效注册。
+9. 重启浏览器后确认拦截依然生效。
+10. 确认角标计数随拦截增长、导航后归零。
+
+第 6、7 步对应逃逸测试页最后一行 `getUserMedia`：媒体开关默认关闭，
+所以默认设置下那一行显示「未拦截」是正确的，不是漏洞。
+
+如果 popup 顶部出现红色警告横幅，说明 Service Worker 注册同步失败——
+此时扩展**没有在拦截**，横幅上的原因就是排查起点，其余各条验收都无从谈起。
