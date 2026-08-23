@@ -52,7 +52,11 @@ async function buildEsm() {
       outDir,
       emptyOutDir: false,
       target: 'chrome119',
-      minify: false,
+      // popup 打包了整个 React，不压缩接近 500KB。它不是注入到页面里的代码，
+      // 没有可审计性诉求，压就是了。
+      // 用 'oxc' 而不是 'esbuild'：Vite 8 走的是 rolldown，esbuild 并不在依赖里，
+      // 指定 'esbuild' 会在构建时报 Cannot find package 'esbuild'。
+      minify: 'oxc',
       sourcemap: false,
       watch: watch ? {} : null,
       rollupOptions: {
@@ -79,6 +83,10 @@ async function buildIife({ entry, out }) {
       outDir,
       emptyOutDir: false,
       target: 'chrome119',
+      // 注入脚本刻意不压缩。它们各自只有 2.5～3.8KB，压缩省不下什么；
+      // 而对一个隐私扩展来说，任何人都能打开 dist/injected/*.js 逐行读懂
+      // "到底往我每个页面里注入了什么"，本身就是这个扩展值得被信任的理由之一。
+      // 不要为了"统一风格"把这里也改成压缩。
       minify: false,
       sourcemap: false,
       watch: watch ? {} : null,
