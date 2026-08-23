@@ -8,50 +8,217 @@
       li { margin-bottom: 6px; }
       .blocked { color: #1e8449; font-weight: 600; }
       .leaked { color: #c0392b; font-weight: 600; }
+      .unknown { color: #b7791f; font-weight: 600; }
+      .note { background: #f4f4f4; border-left: 3px solid #999; padding: 8px 12px; margin: 12px 0; }
     </style>
   </head>
   <body>
     <h1>WebRTC 逃逸测试</h1>
-    <p>全部条目都应显示 <span class="blocked">已拦截</span>。任何一条显示 <span class="leaked">未拦截</span> 都是漏洞。</p>
+
+    <p>
+      本页面探测顶层 window、两种前缀别名、三种 iframe 逃逸路径与
+      <code>getUserMedia</code> 是否已被 WebRTC Blocker 拦截。
+      默认状态下（未把本站加入白名单）应全部显示
+      <span class="blocked">已拦截</span>；任何一项显示
+      <span class="leaked">未拦截</span> 都是漏洞。
+    </p>
+
+    <div class="note">
+      <strong>对照基线：</strong>在<em>未安装扩展</em>的浏览器里打开本页面，
+      下面每一行都应该显示 <span class="leaked">未拦截</span>——这是本页面作为验收工具的对照基线。
+      如果某一行在未安装扩展时就已经显示 <span class="blocked">已拦截</span>，
+      说明这一行已经失去判别力，不能据它判断扩展是否生效。
+      <br />
+      已知存在这种情况的一行是「webkit 前缀别名」：如果当前浏览器版本已经不再提供
+      <code>window.webkitRTCPeerConnection</code> 这个历史别名，该行会一直显示
+      「已拦截（构造函数不可用）」，这与扩展无关，请以其余几行为准。
+      <br />
+      部分探测项可能显示 <span class="unknown">无法判定</span>：代表页面自身无法确认结果
+      （例如 <code>data:</code> 文档未能在超时时间内回传消息），既不代表已拦截也不代表未拦截，请手动进一步排查，
+      不要当作「已拦截」计入结论。
+    </div>
+
     <ul id="results"></ul>
+
     <script>
       const results = document.getElementById('results');
 
-      function record(label, getConstructor) {
-        const li = document.createElement('li');
+      function badgeClass(state) {
+        if (state === 'blocked') return 'blocked';
+        if (state === 'undetermined') return 'unknown';
+        return 'leaked';
+      }
+
+      async function record(label, probe) {
+        let state = 'leaked';
         let verdict = '未拦截';
-        let ok = false;
         try {
-          const PC = getConstructor();
-          if (typeof PC !== 'function') {
-            verdict = '已拦截（构造函数不可用）';
-            ok = true;
+          const outcome = await probe();
+          if (outcome && outcome.undetermined) {
+            state = 'undetermined';
+            verdict = '无法判定' + (outcome.detail ? '（' + outcome.detail + '）' : '');
+          } else if (outcome && outcome.blocked) {
+            state = 'blocked';
+            verdict = '已拦截' + (outcome.detail ? '（' + outcome.detail + '）' : '');
           } else {
-            new PC();
+            state = 'leaked';
+            verdict = '未拦截';
           }
         } catch (error) {
-          verdict = '已拦截（' + error.name + '）';
-          ok = true;
+          state = 'undetermined';
+          verdict = '探测本身出错（' + error.name + '），无法判定';
         }
-        li.innerHTML = label + '：<span class="' + (ok ? 'blocked' : 'leaked') + '">' + verdict + '</span>';
+        const li = document.createElement('li');
+        li.innerHTML = label + '：<span class="' + badgeClass(state) + '">' + verdict + '</span>';
         results.appendChild(li);
       }
 
-      function frameConstructor(configure) {
-        const frame = document.createElement('iframe');
-        configure(frame);
-        document.body.appendChild(frame);
-        const PC = frame.contentWindow.RTCPeerConnection;
-        frame.remove();
-        return PC;
+      // 构造函数类探测：构造函数不存在 = 已拦截；构造成功不抛错 = 未拦截；抛错 = 已拦截。
+      function classifyConstructorAttempt(ctor) {
+        if (typeof ctor !== 'function') {
+          return { blocked: true, detail: '构造函数不可用' };
+        }
+        try {
+          const pc = new ctor();
+          if (pc && typeof pc.close === 'function') {
+            try { pc.close(); } catch {}
+          }
+          return { blocked: false };
+        } catch (error) {
+          return { blocked: true, detail: error.name };
+        }
       }
 
-      record('顶层 window', () => window.RTCPeerConnection);
-      record('webkit 前缀别名', () => window.webkitRTCPeerConnection);
-      record('about:blank iframe', () => frameConstructor(() => {}));
-      record('srcdoc iframe', () => frameConstructor((f) => { f.srcdoc = '<p>x</p>'; }));
-      record('data: URL iframe', () => frameConstructor((f) => { f.src = 'data:text/html,<p>x</p>'; }));
-      record('getUserMedia（仅在媒体开关打开时应被拦截）', () => navigator.mediaDevices.getUserMedia);
+      function hideFrame(frame) {
+        frame.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;border:0;';
+      }
+
+      function waitForLoad(frame) {
+        return new Promise((resolve) => {
+          frame.addEventListener('load', () => resolve(), { once: true });
+        });
+      }
+
+      // about:blank / srcdoc 都继承父页面的 origin（同源），可以直接从父页面读取 contentWindow。
+      // 必须等 load 事件（真正导航完成）之后再探测，且探测完成后才能移除 frame——
+      // 提前移除会让浏览器在文档已失活的情况下抛错，把「已拦截」和「工具自身的时序 bug」混在一起。
+      async function probeSameOriginFrame(configure) {
+        const frame = document.createElement('iframe');
+        hideFrame(frame);
+        configure(frame);
+        const loaded = waitForLoad(frame);
+        document.body.appendChild(frame);
+        await loaded;
+        let outcome;
+        try {
+          outcome = classifyConstructorAttempt(frame.contentWindow.RTCPeerConnection);
+        } catch (error) {
+          outcome = { undetermined: true, detail: '读取子 frame 时出错：' + error.name };
+        }
+        frame.remove();
+        return outcome;
+      }
+
+      // data: URL 得到的是不透明（opaque）源，与父页面跨域，父页面无法读取其 contentWindow
+      // 的任意属性（会被同源策略挡下，属于假阳性，不是扩展在拦截）。真正要验证的是
+      // matchOriginAsFallback 有没有把注入脚本送进这个 frame——所以探测脚本必须运行在
+      // data: 文档内部，自己判定结果，再用 postMessage 把结果带回父页面。
+      // 如果超时收不到消息，如实报告「无法判定」，不能当成「已拦截」。
+      function probeDataUrlFrame() {
+        return new Promise((resolve) => {
+          const token = 'wrtc-escape-' + Math.random().toString(36).slice(2) + Date.now();
+          const probeScript =
+            "(function () {" +
+            "  var result;" +
+            "  try {" +
+            "    var PC = window.RTCPeerConnection;" +
+            "    if (typeof PC !== 'function') {" +
+            "      result = { blocked: true, detail: '构造函数不可用' };" +
+            "    } else {" +
+            "      try {" +
+            "        var pc = new PC();" +
+            "        if (pc && typeof pc.close === 'function') { try { pc.close(); } catch (e) {} }" +
+            "        result = { blocked: false };" +
+            "      } catch (error) {" +
+            "        result = { blocked: true, detail: error.name };" +
+            "      }" +
+            "    }" +
+            "  } catch (error) {" +
+            "    result = { undetermined: true, detail: '探测脚本出错：' + error.name };" +
+            "  }" +
+            "  parent.postMessage({ token: '" + token + "', result: result }, '*');" +
+            "})();";
+          const html = '<script>' + probeScript + '<' + '/script>';
+          const dataUrl = 'data:text/html,' + encodeURIComponent(html);
+
+          const frame = document.createElement('iframe');
+          hideFrame(frame);
+
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener('message', onMessage);
+            frame.remove();
+            resolve({ undetermined: true, detail: '3 秒内未收到 data: 文档回传的结果' });
+          }, 3000);
+
+          function onMessage(event) {
+            const data = event.data;
+            if (!data || data.token !== token) return;
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener('message', onMessage);
+            frame.remove();
+            resolve(data.result);
+          }
+
+          window.addEventListener('message', onMessage);
+          frame.src = dataUrl;
+          document.body.appendChild(frame);
+        });
+      }
+
+      // getUserMedia 是方法不是构造函数（没有 [[Construct]]）。原生实现 new 不了，
+      // 会抛 TypeError，被误判成「已拦截」；扩展补丁是用普通 function 写的、显式 return
+      // 一个 Promise，new 它反而不抛错，被误判成「未拦截」——两个方向都反。
+      // 正确做法是判断它是否还是原生实现，且不能真的调用它（会弹权限框，用户点「拒绝」
+      // 同样是 NotAllowedError，又会造成假阳性）。
+      function classifyGetUserMedia() {
+        const md = navigator.mediaDevices;
+        const fn = md && md.getUserMedia;
+        if (typeof fn !== 'function') {
+          return { blocked: true, detail: '方法不可用' };
+        }
+        let source;
+        try {
+          source = Function.prototype.toString.call(fn);
+        } catch (error) {
+          return { undetermined: true, detail: '无法读取函数源码：' + error.name };
+        }
+        if (source.includes('[native code]')) {
+          return { blocked: false };
+        }
+        return { blocked: true, detail: '已被替换为非原生实现' };
+      }
+
+      async function main() {
+        await record('顶层 window', () => classifyConstructorAttempt(window.RTCPeerConnection));
+        await record('webkit 前缀别名', () => classifyConstructorAttempt(window.webkitRTCPeerConnection));
+        await record('about:blank iframe', () => probeSameOriginFrame((f) => { f.src = 'about:blank'; }));
+        await record('srcdoc iframe', () => probeSameOriginFrame((f) => { f.srcdoc = '<p>x</p>'; }));
+        await record(
+          'data: URL iframe（探测脚本运行在 data: 文档内部，结果通过 postMessage 回传）',
+          probeDataUrlFrame,
+        );
+        await record(
+          'getUserMedia（检测是否已被替换为非原生实现；不会真的调用它，避免弹出权限框）',
+          () => classifyGetUserMedia(),
+        );
+      }
+
+      main();
     </script>
   </body>
 </html>
