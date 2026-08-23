@@ -63,6 +63,18 @@ describe('desiredRegistrations', () => {
     });
   });
 
+  /**
+   * 这两条字符串是注册策略与构建产物之间唯一的契约，此前没有任何测试碰过它们：
+   * 改掉 core/script-files.ts 里的名字，103 个用例照样全绿、tsc 照样干净，
+   * 装进浏览器才会在运行时报 "Could not load javascript ... for content script"。
+   * 这里把它们钉死；build.mjs 的产物文件名同样由那两个常量派生，两头一起动才会通过。
+   */
+  it('注入脚本路径与构建产物一一对应', () => {
+    const specs = desiredRegistrations(settings({ blockMedia: true }));
+    expect(specs[0]?.js).toEqual(['injected/rtc.js']);
+    expect(specs[1]?.js).toEqual(['injected/media.js']);
+  });
+
   it('白名单转成 excludeMatches', () => {
     const [spec] = desiredRegistrations(settings({ whitelist: ['a.com'] }));
     expect(spec?.excludeMatches).toEqual(['*://a.com/*', '*://*.a.com/*']);

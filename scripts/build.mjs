@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { strict as assert } from 'node:assert';
+import { access, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -9,18 +10,25 @@ const srcDir = resolve(root, 'src');
 const outDir = resolve(root, 'dist');
 const watch = process.argv.includes('--watch');
 
+const importTs = (relative) => import(pathToFileURL(resolve(root, relative)).href);
+
+// Node 24 原生支持 TypeScript 类型剥离，可直接 import .ts。
+// 类型剥离不会改写模块说明符，所以只有"自身没有 import"的模块才加载得进来——
+// manifest.ts 与 core/script-files.ts 都是为此刻意保持无依赖的。
+// 从它们读路径而不是在这里重抄一遍，是这份构建脚本与运行时不会各说各话的唯一保证。
+const { manifest } = await importTs('src/manifest.ts');
+const { RTC_SCRIPT_FILE, MEDIA_SCRIPT_FILE } = await importTs('src/core/script-files.ts');
+
 // Rollup 的 iife 格式不允许多入口（"IIFE output formats are not supported for
 // code-splitting builds"），而 content script 又必须是自包含单文件，
 // 所以每个注入脚本各构建一次。
 const iifeTargets = [
-  { entry: 'src/injected/rtc.ts', out: 'injected/rtc.js' },
-  { entry: 'src/injected/media.ts', out: 'injected/media.js' },
-  { entry: 'src/relay/isolated.ts', out: 'relay/isolated.js' },
+  { entry: 'src/injected/rtc.ts', out: RTC_SCRIPT_FILE },
+  { entry: 'src/injected/media.ts', out: MEDIA_SCRIPT_FILE },
+  { entry: 'src/relay/isolated.ts', out: manifest.content_scripts[0].js[0] },
 ];
 
 async function writeManifest() {
-  // Node 24 原生支持 TypeScript 类型剥离，可直接 import .ts。
-  const { manifest } = await import(pathToFileURL(resolve(srcDir, 'manifest.ts')).href);
   await mkdir(outDir, { recursive: true });
   await writeFile(
     resolve(outDir, 'manifest.json'),
@@ -80,6 +88,37 @@ async function buildIife({ entry, out }) {
   });
 }
 
+/**
+ * 扩展会去加载哪些文件，是散落在 manifest.ts 与 core/script-files.ts 里的字符串。
+ * 名字一改而构建产物没跟上，Chrome 只会在运行时抛
+ * "Could not load javascript ... for content script"——而且是静默的。
+ * 构建期把它们逐个落地核对一遍，几乎不要钱，却能把这类错误挡在发布之前。
+ */
+async function assertArtifacts() {
+  const referenced = [
+    manifest.background.service_worker,
+    manifest.action.default_popup,
+    ...manifest.content_scripts.flatMap((entry) => entry.js),
+    RTC_SCRIPT_FILE,
+    MEDIA_SCRIPT_FILE,
+  ];
+
+  const missing = [];
+  for (const file of new Set(referenced)) {
+    try {
+      await access(resolve(outDir, file));
+    } catch {
+      missing.push(file);
+    }
+  }
+
+  assert.deepEqual(
+    missing,
+    [],
+    `构建产物缺失，扩展装上去会在运行时失败：${missing.join(', ')}`,
+  );
+}
+
 if (!watch) {
   await rm(outDir, { recursive: true, force: true });
 }
@@ -87,4 +126,9 @@ await writeManifest();
 await buildEsm();
 for (const target of iifeTargets) {
   await buildIife(target);
+}
+// watch 模式下构建是持续进行的，此时断言没有意义。
+if (!watch) {
+  await assertArtifacts();
+  console.log('产物校验通过：manifest 与注册策略引用的文件都已生成。');
 }

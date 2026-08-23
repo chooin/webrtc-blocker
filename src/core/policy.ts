@@ -5,14 +5,14 @@ import type {
   ScriptId,
   Settings,
 } from './types';
+import { MEDIA_SCRIPT_FILE, RTC_SCRIPT_FILE } from './script-files';
 import { toExcludeMatches } from './whitelist';
 
 export const RTC_SCRIPT_ID: ScriptId = 'rtc-blocker';
 export const MEDIA_SCRIPT_ID: ScriptId = 'media-blocker';
 
-/** 与 scripts/build.mjs 的 IIFE 产物路径一一对应。 */
-export const RTC_SCRIPT_FILE = 'injected/rtc.js';
-export const MEDIA_SCRIPT_FILE = 'injected/media.js';
+// 产物路径的唯一定义在 ./script-files，scripts/build.mjs 也是从那里读的。
+export { MEDIA_SCRIPT_FILE, RTC_SCRIPT_FILE };
 
 /**
  * privacy.network 是全局设置，无法按域名区分，故取三档折中：
