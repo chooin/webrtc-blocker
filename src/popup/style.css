@@ -1,0 +1,47 @@
+.popup {
+  box-sizing: border-box;
+  width: 280px;
+  padding: 14px;
+  font: 13px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.site {
+  padding: 10px;
+  margin: 12px 0;
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: 6px;
+}
+
+.host {
+  margin: 0 0 4px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.state-blocked { color: #c0392b; }
+.state-allowed { color: #1e8449; }
+
+.site button {
+  width: 100%;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.count {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
