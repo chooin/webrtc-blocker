@@ -40,7 +40,17 @@ export async function recordBlock(tabId: number, deps: CounterDeps): Promise<num
   return next;
 }
 
+/** 标签页仍然存在（例如刚开始导航）时的重置：清计数，并把角标一起抹掉。 */
 export async function resetTab(tabId: number, deps: CounterDeps): Promise<void> {
   await deps.session.remove(counterKey(tabId));
   await deps.badge.setBadgeText({ tabId, text: '' });
+}
+
+/**
+ * 标签页已经关闭时的清理：只能动存储。
+ * 对已消失的 tabId 调用 setBadgeText，Chrome 会以 `No tab with id: N.` 拒绝——
+ * 那是每关一个标签页就必然发生一次的失败，所以这条路径刻意不接受 BadgeLike。
+ */
+export async function forgetTab(tabId: number, session: SessionArea): Promise<void> {
+  await session.remove(counterKey(tabId));
 }

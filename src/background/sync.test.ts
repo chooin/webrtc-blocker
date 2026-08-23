@@ -75,4 +75,38 @@ describe('syncBlocking', () => {
     await syncBlocking(settings({ whitelist: ['a.com'] }), deps);
     expect(calls).toContain('ip:default_public_interface_only');
   });
+
+  /**
+   * 脚本注册被 Chrome 拒绝，恰恰是最需要网络层兜底的时刻。
+   * 若在这里提前 return，第一道和第二道防线会一起消失。
+   */
+  it('脚本注册失败时仍然下发 IP 策略，并把失败继续抛出去', async () => {
+    const { calls, deps } = fakeDeps();
+    deps.scripting.registerContentScripts = async () => {
+      throw new Error('PARSE_ERROR_INVALID_HOST_WILDCARD');
+    };
+    await expect(syncBlocking(settings(), deps)).rejects.toThrow(
+      'PARSE_ERROR_INVALID_HOST_WILDCARD',
+    );
+    expect(calls).toContain('ip:disable_non_proxied_udp');
+  });
+
+  it('IP 策略自己失败时也会抛出去，不会被静默吞掉', async () => {
+    const { deps } = fakeDeps();
+    deps.ipPolicy.set = async () => {
+      throw new Error('privacy 权限被撤销');
+    };
+    await expect(syncBlocking(settings(), deps)).rejects.toThrow('privacy 权限被撤销');
+  });
+
+  it('两处都失败时优先报出更接近根因的注册失败', async () => {
+    const { deps } = fakeDeps();
+    deps.scripting.registerContentScripts = async () => {
+      throw new Error('注册失败');
+    };
+    deps.ipPolicy.set = async () => {
+      throw new Error('IP 策略失败');
+    };
+    await expect(syncBlocking(settings(), deps)).rejects.toThrow('注册失败');
+  });
 });

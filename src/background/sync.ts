@@ -18,7 +18,7 @@ export interface SyncDeps {
   ipPolicy: IpPolicyLike;
 }
 
-export async function syncBlocking(settings: Settings, deps: SyncDeps): Promise<void> {
+async function syncScripts(settings: Settings, deps: SyncDeps): Promise<void> {
   const current = await deps.scripting.getRegisteredContentScripts();
   const plan = reconcile(
     current.map((script) => script.id),
@@ -35,6 +35,28 @@ export async function syncBlocking(settings: Settings, deps: SyncDeps): Promise<
   if (plan.update.length > 0) {
     await deps.scripting.updateContentScripts(plan.update);
   }
+}
 
-  await deps.ipPolicy.set({ value: ipHandlingPolicy(settings) });
+/**
+ * 脚本注册失败时仍然下发 IP 策略：它是第二道防线，恰恰在 JS 层没能就位时最需要生效。
+ * 失败原因照常向上抛，由调用方记录并让 popup 如实告知用户。
+ */
+export async function syncBlocking(settings: Settings, deps: SyncDeps): Promise<void> {
+  // 用对象包一层而不是直接存 error：抛出来的值可能就是 undefined。
+  let failure: { error: unknown } | null = null;
+
+  try {
+    await syncScripts(settings, deps);
+  } catch (error) {
+    failure = { error };
+  }
+
+  try {
+    await deps.ipPolicy.set({ value: ipHandlingPolicy(settings) });
+  } catch (error) {
+    // 先发生的失败信息更接近根因，故只在还没有失败时才记录这一个。
+    failure ??= { error };
+  }
+
+  if (failure !== null) throw failure.error;
 }

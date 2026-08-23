@@ -1,4 +1,4 @@
-import { badgeText, counterKey, readCount, recordBlock, resetTab } from './counter';
+import { badgeText, counterKey, forgetTab, readCount, recordBlock, resetTab } from './counter';
 
 function fakeDeps(initial: Record<string, unknown> = {}) {
   const store: Record<string, unknown> = { ...initial };
@@ -89,5 +89,31 @@ describe('readCount / resetTab', () => {
     await resetTab(5, deps);
     expect(counterKey(5) in store).toBe(false);
     expect(badges).toEqual([{ tabId: 5, text: '' }]);
+  });
+});
+
+describe('forgetTab', () => {
+  it('只清存储，不接触角标', async () => {
+    const { deps, store } = fakeDeps();
+    await recordBlock(5, deps);
+    await forgetTab(5, deps.session);
+    expect(counterKey(5) in store).toBe(false);
+  });
+
+  // 标签页关闭后 setBadgeText 必然被 Chrome 以 `No tab with id: N.` 拒绝。
+  // forgetTab 的签名里根本没有 BadgeLike，这里再用一个只会报错的角标做一次实证。
+  it('角标接口一调用就报错时，清理依旧成功', async () => {
+    const { deps, store } = fakeDeps();
+    await recordBlock(5, deps);
+    deps.badge.setBadgeText = async () => {
+      throw new Error('No tab with id: 5.');
+    };
+    await expect(forgetTab(5, deps.session)).resolves.toBeUndefined();
+    expect(counterKey(5) in store).toBe(false);
+  });
+
+  it('没有记录时也不报错', async () => {
+    const { deps } = fakeDeps();
+    await expect(forgetTab(404, deps.session)).resolves.toBeUndefined();
   });
 });
