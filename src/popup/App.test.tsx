@@ -73,6 +73,13 @@ describe('App', () => {
     await waitFor(() => expect(current().whitelist).toEqual([]));
   });
 
+  it('总开关关闭且本站不在白名单时按钮仍显示放行本站', async () => {
+    const { api } = fakeApi({ enabled: false });
+    render(<App api={api} />);
+    expect(await screen.findByText('已放行')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '放行本站' })).toBeTruthy();
+  });
+
   it('展示本页拦截次数', async () => {
     const { api } = fakeApi({}, 'example.com', 7);
     render(<App api={api} />);
