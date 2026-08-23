@@ -27,6 +27,33 @@ describe('normalizeHost', () => {
     expect(normalizeHost('   ')).toBe('');
     expect(normalizeHost('http://')).toBe('');
   });
+
+  // 这些值都能被 WHATWG URL 解析成功，却不是普通主机名。
+  // 放行任何一个，它都会被原样拼进 Chrome 的 match pattern：
+  // '*' 让 excludeMatches 覆盖全网（静默全局失效），
+  // 带通配的其余几个会让整个 registerContentScripts 被拒（同样静默、同样全局）。
+  it('通配符主机一律拒绝，否则一条存储值就能让全站放行', () => {
+    expect(normalizeHost('*')).toBe('');
+    expect(normalizeHost('*.example.com')).toBe('');
+    expect(normalizeHost('ex*ample.com')).toBe('');
+  });
+
+  it('空标签的主机一律拒绝', () => {
+    expect(normalizeHost('..')).toBe('');
+    expect(normalizeHost('a..b.com')).toBe('');
+  });
+
+  it('标签不得以连字符开头或结尾', () => {
+    expect(normalizeHost('-a.com')).toBe('');
+    expect(normalizeHost('a-.com')).toBe('');
+  });
+
+  it('IPv6 字面量、IPv4 与 punycode 依旧放行', () => {
+    expect(normalizeHost('[::1]')).toBe('[::1]');
+    expect(normalizeHost('192.168.1.1')).toBe('192.168.1.1');
+    expect(normalizeHost('xn--fsqu00a.xn--0zwm56d')).toBe('xn--fsqu00a.xn--0zwm56d');
+    expect(normalizeHost('localhost')).toBe('localhost');
+  });
 });
 
 describe('isWhitelisted', () => {
@@ -92,5 +119,11 @@ describe('toExcludeMatches', () => {
 
   it('空白名单产出空数组', () => {
     expect(toExcludeMatches([])).toEqual([]);
+  });
+
+  it('通配符条目不会变成排除全网的模式', () => {
+    expect(toExcludeMatches(['*'])).toEqual([]);
+    expect(toExcludeMatches(['*.example.com'])).toEqual([]);
+    expect(toExcludeMatches(['*', 'a.com'])).toEqual(['*://a.com/*', '*://*.a.com/*']);
   });
 });
