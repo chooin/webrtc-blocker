@@ -219,7 +219,7 @@ describe('normalizeHost', () => {
   });
 
   it('把中文域名转成 punycode', () => {
-    expect(normalizeHost('例子.测试')).toBe('xn--fsqu00a.xn--g6w251d');
+    expect(normalizeHost('例子.测试')).toBe('xn--fsqu00a.xn--0zwm56d');
   });
 
   it('去掉根域末尾的点', () => {
@@ -380,8 +380,9 @@ Expected: 全部 PASS，typecheck 无输出
 
 - [ ] **Step 10: 提交**
 
+`.gitignore` 已存在于仓库中，**不要覆盖它**——它含有本次执行所需的条目。
+
 ```bash
-printf 'node_modules/\ndist/\n*.local\n.DS_Store\n' > .gitignore
 git add -A
 git commit -m "feat: 项目脚手架与白名单域名匹配逻辑"
 ```
