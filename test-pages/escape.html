@@ -18,9 +18,11 @@
     <p>
       本页面探测顶层 window、两种前缀别名、三种 iframe 逃逸路径与
       <code>getUserMedia</code> 是否已被 WebRTC Blocker 拦截。
-      默认状态下（未把本站加入白名单）应全部显示
-      <span class="blocked">已拦截</span>；任何一项显示
+      默认状态下（未把本站加入白名单），前五行 <strong>RTC 探测</strong>应全部显示
+      <span class="blocked">已拦截</span>；其中任何一行显示
       <span class="leaked">未拦截</span> 都是漏洞。
+      <strong>最后一行 <code>getUserMedia</code> 是例外</strong>，它默认就应该显示
+      <span class="leaked">未拦截</span>，读法见下方说明。
     </p>
 
     <div class="note">
@@ -36,6 +38,21 @@
       部分探测项可能显示 <span class="unknown">无法判定</span>：代表页面自身无法确认结果
       （例如 <code>data:</code> 文档未能在超时时间内回传消息），既不代表已拦截也不代表未拦截，请手动进一步排查，
       不要当作「已拦截」计入结论。
+    </div>
+
+    <div class="note">
+      <strong>怎么读 <code>getUserMedia</code> 这一行：</strong>
+      摄像头与麦克风的拦截由扩展里<em>单独的</em>「同时拦截摄像头与麦克风」开关控制，
+      而这个开关<strong>默认是关闭的</strong>。所以在默认设置下这一行显示
+      <span class="leaked">未拦截</span> 是<strong>正确的</strong>，不是漏洞——
+      只有打开那个开关并刷新本页之后，它才应该变成 <span class="blocked">已拦截</span>。
+      <br />
+      <strong>而且这一行只有在本页通过 <code>http://localhost</code> 打开时才有判别力。</strong>
+      <code>navigator.mediaDevices</code> 只存在于安全上下文，用 <code>file://</code>
+      或非 localhost 的 <code>http://</code> 打开本页时它是 <code>undefined</code>，
+      这一行会无条件显示「已拦截（方法不可用）」——那与扩展是否生效毫无关系。
+      README 里给的 <code>python3 -m http.server 8765 -d test-pages</code>
+      加 <code>http://localhost:8765/escape.html</code> 正是为此。
     </div>
 
     <ul id="results"></ul>
