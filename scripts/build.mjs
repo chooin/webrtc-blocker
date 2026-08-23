@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { access, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -35,6 +35,10 @@ async function writeManifest() {
     `${JSON.stringify(manifest, null, 2)}\n`,
     'utf8',
   );
+}
+
+async function copyIcons() {
+  await cp(resolve(srcDir, 'icons'), resolve(outDir, 'icons'), { recursive: true });
 }
 
 // root 设为 src，好让 popup/index.html 输出到 dist/popup/index.html
@@ -98,6 +102,8 @@ async function assertArtifacts() {
   const referenced = [
     manifest.background.service_worker,
     manifest.action.default_popup,
+    ...Object.values(manifest.icons),
+    ...Object.values(manifest.action.default_icon),
     ...manifest.content_scripts.flatMap((entry) => entry.js),
     RTC_SCRIPT_FILE,
     MEDIA_SCRIPT_FILE,
@@ -123,6 +129,7 @@ if (!watch) {
   await rm(outDir, { recursive: true, force: true });
 }
 await writeManifest();
+await copyIcons();
 await buildEsm();
 for (const target of iifeTargets) {
   await buildIife(target);
