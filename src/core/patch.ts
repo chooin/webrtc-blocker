@@ -74,3 +74,94 @@ export function installRtcBlocker(
     defineLocked(target, api, makeThrowingConstructor(original, api, report));
   }
 }
+
+export interface MediaTargetLike {
+  navigator?: Record<string, unknown> & { mediaDevices?: Record<string, unknown> };
+  MediaDevices?: { prototype?: Record<string, unknown> };
+  Navigator?: { prototype?: Record<string, unknown> };
+}
+
+const patchedMediaHolders = new WeakSet<object>();
+
+/**
+ * 模仿"用户拒绝授权"——这是每个站点都写过 catch 分支的路径。
+ * 若改成同步抛错，那是浏览器里从不会出现的行为，会把站点推进没人测过的代码路径。
+ */
+function notAllowed(): DOMException {
+  return new DOMException(
+    'Permission denied by the WebRTC Blocker extension.',
+    'NotAllowedError',
+  );
+}
+
+function makeRejectingMethod(
+  original: unknown,
+  api: BlockedApi,
+  exposedName: string,
+  report: BlockReporter | undefined,
+): unknown {
+  const length = typeof original === 'function' ? original.length : 1;
+  const blocked = function (): Promise<never> {
+    safeReport(report, api);
+    return Promise.reject(notAllowed());
+  };
+  Object.defineProperty(blocked, 'name', { value: exposedName, configurable: true });
+  Object.defineProperty(blocked, 'length', { value: length, configurable: true });
+  return blocked;
+}
+
+function makeLegacyMethod(
+  original: unknown,
+  report: BlockReporter | undefined,
+): unknown {
+  const length = typeof original === 'function' ? original.length : 3;
+  const blocked = function (
+    _constraints: unknown,
+    _onSuccess?: unknown,
+    onError?: unknown,
+  ): void {
+    safeReport(report, 'legacyGetUserMedia');
+    if (typeof onError === 'function') {
+      (onError as (e: unknown) => void)(notAllowed());
+    }
+  };
+  Object.defineProperty(blocked, 'name', { value: 'getUserMedia', configurable: true });
+  Object.defineProperty(blocked, 'length', { value: length, configurable: true });
+  return blocked;
+}
+
+export function installMediaBlocker(
+  target: MediaTargetLike,
+  report?: BlockReporter,
+): void {
+  const nav = target.navigator;
+  if (nav === undefined) return;
+
+  // 原型和实例都要打：只改实例会被 MediaDevices.prototype.getUserMedia.call(...) 绕过。
+  const mediaHolders: Record<string, unknown>[] = [];
+  const mediaProto = target.MediaDevices?.prototype;
+  if (mediaProto !== undefined) mediaHolders.push(mediaProto);
+  if (nav.mediaDevices !== undefined) mediaHolders.push(nav.mediaDevices);
+
+  for (const holder of mediaHolders) {
+    if (patchedMediaHolders.has(holder)) continue;
+    patchedMediaHolders.add(holder);
+    for (const api of ['getUserMedia', 'getDisplayMedia'] as const) {
+      const original = holder[api];
+      if (original === undefined) continue;
+      defineLocked(holder, api, makeRejectingMethod(original, api, api, report));
+    }
+  }
+
+  const legacyHolders: Record<string, unknown>[] = [];
+  const navProto = target.Navigator?.prototype;
+  if (navProto !== undefined) legacyHolders.push(navProto);
+  legacyHolders.push(nav);
+
+  for (const holder of legacyHolders) {
+    if (patchedMediaHolders.has(holder)) continue;
+    if (holder.getUserMedia === undefined) continue;
+    patchedMediaHolders.add(holder);
+    defineLocked(holder, 'getUserMedia', makeLegacyMethod(holder.getUserMedia, report));
+  }
+}

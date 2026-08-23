@@ -1,5 +1,5 @@
 import type { BlockedApi } from './types';
-import { installRtcBlocker } from './patch';
+import { installRtcBlocker, installMediaBlocker } from './patch';
 
 class FakePeerConnection {
   constructor(_config?: unknown) {}
@@ -108,5 +108,107 @@ describe('installRtcBlocker', () => {
     expect(() => new Blocked()).toThrow(TypeError);
     // Must have the correct blocking message, not the reporter's message
     expect(() => new Blocked()).toThrow(/WebRTC is disabled/);
+  });
+});
+
+function makeMediaTarget() {
+  const mediaDevicesProto: Record<string, unknown> = {
+    getUserMedia(_c?: unknown) {
+      return Promise.resolve('real stream');
+    },
+    getDisplayMedia(_c?: unknown) {
+      return Promise.resolve('real screen');
+    },
+    enumerateDevices() {
+      return Promise.resolve(['device']);
+    },
+  };
+  const navigatorProto: Record<string, unknown> = {
+    getUserMedia(_c: unknown, _ok?: unknown, _err?: unknown) {},
+  };
+  const mediaDevices = Object.create(mediaDevicesProto) as Record<string, unknown>;
+  const navigator = Object.create(navigatorProto) as Record<string, unknown>;
+  navigator.mediaDevices = mediaDevices;
+
+  return {
+    target: {
+      navigator,
+      MediaDevices: { prototype: mediaDevicesProto },
+      Navigator: { prototype: navigatorProto },
+    },
+    mediaDevicesProto,
+    navigatorProto,
+    mediaDevices,
+    navigator,
+  };
+}
+
+describe('installMediaBlocker', () => {
+  it('getUserMedia 返回 reject 成 NotAllowedError 的 Promise，而不是同步抛错', async () => {
+    const { target, mediaDevices } = makeMediaTarget();
+    installMediaBlocker(target);
+    const gum = mediaDevices.getUserMedia as () => Promise<unknown>;
+    let promise: Promise<unknown>;
+    expect(() => {
+      promise = gum();
+    }).not.toThrow();
+    await expect(promise!).rejects.toMatchObject({ name: 'NotAllowedError' });
+  });
+
+  it('getDisplayMedia 同样被拒绝', async () => {
+    const { target, mediaDevices } = makeMediaTarget();
+    installMediaBlocker(target);
+    const gdm = mediaDevices.getDisplayMedia as () => Promise<unknown>;
+    await expect(gdm()).rejects.toMatchObject({ name: 'NotAllowedError' });
+  });
+
+  it('堵住通过 MediaDevices.prototype 的绕过路径', async () => {
+    const { target, mediaDevicesProto, mediaDevices } = makeMediaTarget();
+    installMediaBlocker(target);
+    const viaProto = mediaDevicesProto.getUserMedia as (this: unknown) => Promise<unknown>;
+    await expect(viaProto.call(mediaDevices)).rejects.toMatchObject({ name: 'NotAllowedError' });
+  });
+
+  it('legacy navigator.getUserMedia 走 error callback 而不是抛错', () => {
+    const { target, navigator } = makeMediaTarget();
+    installMediaBlocker(target);
+    const legacy = navigator.getUserMedia as (
+      c: unknown,
+      ok: (s: unknown) => void,
+      err: (e: unknown) => void,
+    ) => void;
+    const onError = vi.fn();
+    const onSuccess = vi.fn();
+    legacy({}, onSuccess, onError);
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]?.[0]).toMatchObject({ name: 'NotAllowedError' });
+  });
+
+  it('不触碰 enumerateDevices', () => {
+    const { target, mediaDevicesProto } = makeMediaTarget();
+    const original = mediaDevicesProto.enumerateDevices;
+    installMediaBlocker(target);
+    expect(mediaDevicesProto.enumerateDevices).toBe(original);
+  });
+
+  it('target 上没有 navigator 时直接返回，不抛错', () => {
+    expect(() => installMediaBlocker({})).not.toThrow();
+  });
+
+  it('重复调用幂等', () => {
+    const { target, mediaDevices } = makeMediaTarget();
+    installMediaBlocker(target);
+    const first = mediaDevices.getUserMedia;
+    expect(() => installMediaBlocker(target)).not.toThrow();
+    expect(mediaDevices.getUserMedia).toBe(first);
+  });
+
+  it('拦截时上报正确的 API 名', async () => {
+    const { target, mediaDevices } = makeMediaTarget();
+    const seen: string[] = [];
+    installMediaBlocker(target, (api) => seen.push(api));
+    await (mediaDevices.getUserMedia as () => Promise<unknown>)().catch(() => undefined);
+    expect(seen).toEqual(['getUserMedia']);
   });
 });
