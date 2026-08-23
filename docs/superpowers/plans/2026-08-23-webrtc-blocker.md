@@ -17,7 +17,7 @@
 - `src/core/**` 与 `src/shared/**` **不得引用 `chrome.*` 任何 API**，必须可在 `environment: 'node'` 下直接测试。
 - 注入脚本（`src/injected/**`）**不得读取任何状态、不得有异步、不得有条件分支**。它一旦执行就无条件打补丁。
 - 幂等标记**不得写在 target 对象上**（对页面可见、可被伪造），必须使用闭包内的 `WeakSet`。
-- 所有 `Object.defineProperty` 写入必须以 `try/catch` 包裹，失败时静默跳过。
+- 对**扩展不拥有的对象**（页面全局、原型链上的方法）的 `Object.defineProperty` 写入必须以 `try/catch` 包裹，失败时静默跳过——原因是这些属性可能已被设为 `configurable: false`，二次写入会抛 `TypeError`。对扩展自己新建的对象（如刚构造出来的替换函数）写 `name` / `length` 不适用此条：这类写入没有失败路径，包 `try/catch` 只会产生无法被测试覆盖的死代码。
 - React 仅允许出现在 `src/popup/**`；`src/injected/**`、`src/relay/**`、`src/background/**` 不得引入任何框架依赖。
 - 拦截语义：`RTCPeerConnection` 系构造函数**同步抛错**；`getUserMedia` / `getDisplayMedia` **返回 reject 成 `DOMException(..., 'NotAllowedError')` 的 Promise**。
 - 不得拦截 `enumerateDevices`。
