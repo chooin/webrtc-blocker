@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebRTC 逃逸测试</title>
+    <style>
+      body { font: 14px/1.7 system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+      li { margin-bottom: 6px; }
+      .blocked { color: #1e8449; font-weight: 600; }
+      .leaked { color: #c0392b; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>WebRTC 逃逸测试</h1>
+    <p>全部条目都应显示 <span class="blocked">已拦截</span>。任何一条显示 <span class="leaked">未拦截</span> 都是漏洞。</p>
+    <ul id="results"></ul>
+    <script>
+      const results = document.getElementById('results');
+
+      function record(label, getConstructor) {
+        const li = document.createElement('li');
+        let verdict = '未拦截';
+        let ok = false;
+        try {
+          const PC = getConstructor();
+          if (typeof PC !== 'function') {
+            verdict = '已拦截（构造函数不可用）';
+            ok = true;
+          } else {
+            new PC();
+          }
+        } catch (error) {
+          verdict = '已拦截（' + error.name + '）';
+          ok = true;
+        }
+        li.innerHTML = label + '：<span class="' + (ok ? 'blocked' : 'leaked') + '">' + verdict + '</span>';
+        results.appendChild(li);
+      }
+
+      function frameConstructor(configure) {
+        const frame = document.createElement('iframe');
+        configure(frame);
+        document.body.appendChild(frame);
+        const PC = frame.contentWindow.RTCPeerConnection;
+        frame.remove();
+        return PC;
+      }
+
+      record('顶层 window', () => window.RTCPeerConnection);
+      record('webkit 前缀别名', () => window.webkitRTCPeerConnection);
+      record('about:blank iframe', () => frameConstructor(() => {}));
+      record('srcdoc iframe', () => frameConstructor((f) => { f.srcdoc = '<p>x</p>'; }));
+      record('data: URL iframe', () => frameConstructor((f) => { f.src = 'data:text/html,<p>x</p>'; }));
+      record('getUserMedia（仅在媒体开关打开时应被拦截）', () => navigator.mediaDevices.getUserMedia);
+    </script>
+  </body>
+</html>
