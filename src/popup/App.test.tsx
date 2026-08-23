@@ -8,10 +8,13 @@ function fakeApi(
   overrides: Partial<Settings> = {},
   host = 'example.com',
   count = 0,
-  syncError: string | null = null,
+  // 大多数用例只关心一个固定值；「保存后同步状态是否变化」这类用例
+  // 需要在多次调用间返回不同结果，故也接受一个取值函数。
+  syncError: string | null | (() => string | null) = null,
 ) {
   let settings: Settings = { enabled: true, blockMedia: false, whitelist: [], ...overrides };
   const saved: Partial<Settings>[] = [];
+  const readSyncError = typeof syncError === 'function' ? syncError : () => syncError;
   const api: PopupApi = {
     getSettings: async () => settings,
     saveSettings: async (patch) => {
@@ -21,7 +24,7 @@ function fakeApi(
     },
     getActiveHost: async () => host,
     getBlockedCount: async () => count,
-    getSyncError: async () => syncError,
+    getSyncError: async () => readSyncError(),
   };
   return { api, saved, current: () => settings };
 }
@@ -151,11 +154,39 @@ describe('App 的失败提示', () => {
     expect(banner.textContent).toContain('storage 写入失败');
   });
 
-  it('保存成功后警告横幅消失', async () => {
-    const { api } = fakeApi({}, 'example.com', 0, '旧的失败');
+  it('保存成功且同步问题已经解决时，警告横幅才会消失', async () => {
+    // 第一次读（初始载入）报错，第二次读（保存触发的重新同步）恢复正常——
+    // 横幅消失必须是"重新读到了好消息"，不能是"保存这个动作本身"。
+    let calls = 0;
+    const { api } = fakeApi({}, 'example.com', 0, () => (calls++ === 0 ? '旧的失败' : null));
     render(<App api={api} />);
     await screen.findByRole('alert');
     await userEvent.click(await screen.findByLabelText('同时拦截摄像头与麦克风'));
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('同步失败仍未解决时，保存成功也不能把警告横幅擦掉', async () => {
+    // 这是上一轮修复要堵死的那类失败：一次成功的保存悄悄抹掉了
+    // 「Service Worker 注册同步失败」的红色横幅，而扩展其实什么都没拦截。
+    const { api } = fakeApi({}, 'example.com', 0, '持续存在的失败');
+    render(<App api={api} />);
+    await screen.findByRole('alert');
+    await userEvent.click(await screen.findByLabelText('同时拦截摄像头与麦克风'));
+    await waitFor(() => expect(screen.queryAllByRole('alert')).not.toHaveLength(0));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('持续存在的失败');
+  });
+
+  it('getSyncError 读取失败不会连累整个弹窗：设置界面照常渲染', async () => {
+    const { api } = fakeApi();
+    const failing: PopupApi = {
+      ...api,
+      getSyncError: async () => {
+        throw new Error('sync 状态读取失败');
+      },
+    };
+    render(<App api={failing} />);
+    expect(await screen.findByLabelText('启用 WebRTC 拦截')).toBeTruthy();
+    expect(await screen.findByText('example.com')).toBeTruthy();
   });
 });
