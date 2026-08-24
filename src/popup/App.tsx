@@ -13,6 +13,57 @@ export interface PopupApi {
   getSyncError(): Promise<string | null>;
 }
 
+/** 品牌栏里的禁止符，与 scripts/make-icons.mjs 画的工具栏图标是同一个图形。 */
+function BrandGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
+      <circle cx="12" cy="12" r="8" />
+      <line x1="6.3" y1="17.7" x2="17.7" y2="6.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * 站点状态标记。拦截时是实心黄的禁止符，放行时是空心灰的圆环——
+ * 两种状态的**形状**就不一样，不只是颜色不一样，色觉障碍下同样分得清。
+ * 纯装饰，语义由旁边的「已拦截」/「已放行」文字承担，故对无障碍树隐藏。
+ */
+function StatusMark({ allowed }: { allowed: boolean }) {
+  if (allowed) {
+    return (
+      <svg className="mark" viewBox="0 0 26 26" aria-hidden="true">
+        <circle cx="13" cy="13" r="8.6" fill="none" stroke="var(--ink-3)" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="mark" viewBox="0 0 26 26" aria-hidden="true">
+      <circle cx="13" cy="13" r="13" fill="var(--mt-yellow)" />
+      <circle cx="13" cy="13" r="7.4" fill="none" stroke="#1b1d21" strokeWidth="2.2" />
+      <line
+        x1="7.8"
+        y1="18.2"
+        x2="18.2"
+        y2="7.8"
+        stroke="#1b1d21"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function Brand() {
+  return (
+    <header className="brand">
+      <span className="brand-mark" aria-hidden="true">
+        <BrandGlyph />
+      </span>
+      <span className="brand-name">WebRTC Blocker</span>
+    </header>
+  );
+}
+
 export function App({ api }: { api: PopupApi }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [host, setHost] = useState('');
@@ -93,14 +144,15 @@ export function App({ api }: { api: PopupApi }) {
     const banner =
       loadError === null ? null : (
         <p className="warning" role="alert">
-          <span aria-hidden="true">⚠️ </span>
-          {loadError}
+          <span aria-hidden="true">⚠️</span>
+          <span>{loadError}</span>
         </p>
       );
     return (
       <main className="popup">
+        <Brand />
         {banner}
-        {loadError === null && <p>载入中…</p>}
+        {loadError === null && <p className="loading">载入中…</p>}
       </main>
     );
   }
@@ -113,8 +165,8 @@ export function App({ api }: { api: PopupApi }) {
   ].filter((message): message is string => message !== null);
   const banner = warnings.map((message) => (
     <p key={message} className="warning" role="alert">
-      <span aria-hidden="true">⚠️ </span>
-      {message}
+      <span aria-hidden="true">⚠️</span>
+      <span>{message}</span>
     </p>
   ));
 
@@ -122,52 +174,66 @@ export function App({ api }: { api: PopupApi }) {
 
   return (
     <main className="popup">
+      <Brand />
+
       {banner}
 
-      <label className="row">
-        <input
-          type="checkbox"
-          aria-label="启用 WebRTC 拦截"
-          checked={settings.enabled}
-          onChange={(event) => void update({ enabled: event.target.checked })}
-        />
-        <span>启用 WebRTC 拦截</span>
-      </label>
+      <div className="stack">
+        {host !== '' && (
+          <section className="card site">
+            <div className="site-head">
+              <StatusMark allowed={allowed} />
+              <div className="site-text">
+                <p className="host">{host}</p>
+                <p className={allowed ? 'state state-allowed' : 'state state-blocked'}>
+                  {allowed ? '已放行' : '已拦截'}
+                </p>
+              </div>
+            </div>
 
-      <label className="row">
-        <input
-          type="checkbox"
-          aria-label="同时拦截摄像头与麦克风"
-          checked={settings.blockMedia}
-          onChange={(event) => void update({ blockMedia: event.target.checked })}
-        />
-        <span>同时拦截摄像头与麦克风</span>
-      </label>
+            <p className="count">
+              本页已拦截 <strong>{count}</strong> 次
+            </p>
 
-      {host !== '' && (
-        <section className="site">
-          <p className="host">{host}</p>
-          <p className={allowed ? 'state state-allowed' : 'state state-blocked'}>
-            {allowed ? '已放行' : '已拦截'}
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              void update({
-                whitelist: isWhitelisted(host, settings.whitelist)
-                  ? removeFromWhitelist(settings.whitelist, host)
-                  : addToWhitelist(settings.whitelist, host),
-              })
-            }
-          >
-            {isWhitelisted(host, settings.whitelist) ? '恢复拦截本站' : '放行本站'}
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                void update({
+                  whitelist: isWhitelisted(host, settings.whitelist)
+                    ? removeFromWhitelist(settings.whitelist, host)
+                    : addToWhitelist(settings.whitelist, host),
+                })
+              }
+            >
+              {isWhitelisted(host, settings.whitelist) ? '恢复拦截本站' : '放行本站'}
+            </button>
+          </section>
+        )}
+
+        <section className="card switches">
+          <label className="row">
+            <span className="row-label">启用 WebRTC 拦截</span>
+            <input
+              type="checkbox"
+              aria-label="启用 WebRTC 拦截"
+              checked={settings.enabled}
+              onChange={(event) => void update({ enabled: event.target.checked })}
+            />
+            <span className="switch" aria-hidden="true" />
+          </label>
+
+          <label className="row">
+            <span className="row-label">同时拦截摄像头与麦克风</span>
+            <input
+              type="checkbox"
+              aria-label="同时拦截摄像头与麦克风"
+              checked={settings.blockMedia}
+              onChange={(event) => void update({ blockMedia: event.target.checked })}
+            />
+            <span className="switch" aria-hidden="true" />
+          </label>
         </section>
-      )}
-
-      <p className="count">
-        本页已拦截 <strong>{count}</strong> 次
-      </p>
+      </div>
     </main>
   );
 }
