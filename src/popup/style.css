@@ -1,6 +1,6 @@
 /*
- * 配色取美团黄 #FFD100。铺底的米黄不是通用的米色，而是把这支黄降饱和提亮得来的，
- * 好让底色与主色是同一支颜色的两个明度，而不是黄色配了一层不相干的米。
+ * 配色取美团黄 #FFD100，但黄只出现在强调件上——按钮、开关、品牌标记。
+ * 铺底与描边一律中性灰：底色本身不带颜色，才让那几处黄真的读成「强调」。
  *
  * 字体一律走系统栈：这是个隐私扩展，为了好看去 Google Fonts 拉一个字体，
  * 等于 popup 每次打开都向第三方发一次请求——那是自相矛盾的。
@@ -12,9 +12,9 @@
   --mt-yellow: #ffd100;
   --mt-yellow-press: #eec000;
 
-  --cream: #fff8e3;
+  --bg: #f4f5f7;
   --card: #ffffff;
-  --edge: #f2e4bb;
+  --edge: #e4e7ec;
 
   --ink: #1b1d21;
   --ink-2: #6b6f76;
@@ -23,7 +23,7 @@
   --track: #dbdee3;
   --ok: #0e9f6e;
 
-  /* 警告条是通栏实心红：米黄底会吃掉淡红底的对比度，只有实心色块压得住。 */
+  /* 警告条是通栏实心红：淡红底在浅灰底上对比度不够，只有实心色块压得住。 */
   --danger-bg: #d92d20;
   --danger-ink: #ffffff;
 
@@ -32,16 +32,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* 深色也保持暖调（底色带一点黄的余温），否则整支品牌色会显得是贴上去的。 */
-    --cream: #191712;
-    --card: #232019;
-    --edge: #343024;
+    /* 深色同样保持中性：暖调深灰在没有米黄底呼应之后，只会显得整体发脏。 */
+    --bg: #17181a;
+    --card: #202226;
+    --edge: #2f3237;
 
-    --ink: #f2f0ea;
-    --ink-2: #a9a59b;
-    --ink-3: #7e7a71;
+    --ink: #f1f2f4;
+    --ink-2: #a5a8ae;
+    --ink-3: #7c7f85;
 
-    --track: #3d3931;
+    --track: #3a3d42;
     --ok: #34d399;
 
     --danger-bg: #c8342a;
@@ -50,7 +50,7 @@
 
 body {
   margin: 0;
-  background: var(--cream);
+  background: var(--bg);
   color: var(--ink);
   font: 13px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -253,7 +253,7 @@ body {
 /* ---------- 警告 ---------- */
 
 /*「扩展没有在保护你」的状态，配色要压过界面上其它一切。
-   通栏实心红：不缩进、不留米黄边距，让它成为整个 popup 唯一的色块中断。 */
+   通栏实心红：不缩进、不留左右边距，让它成为整个 popup 唯一的色块中断。 */
 .warning {
   display: flex;
   gap: 7px;
