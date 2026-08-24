@@ -180,13 +180,11 @@ body {
 
 .stale span { flex: 1; }
 
-/* .site button 那条规则会把这个按钮也撑成整行的主操作，逐项按回来。 */
+/* 行内的次级操作：只占自己内容那么宽，剩下的空间全留给左边的说明文字。
+   `flex: none` 是不让它被文字挤到换行，不是让它去挤文字——前提是它的宽度本来就是内容宽。 */
 .stale-action {
   flex: none;
-  width: auto;
-  height: auto;
   padding: 5px 10px;
-  margin: 0;
   font-size: 12px;
 }
 
@@ -202,15 +200,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 主操作 ---------- */
+/* ---------- 按钮 ---------- */
 
+/* 这条只管**外观**：卡片里的按钮都是同一块黄。尺寸一概不写在这里。
+   `.site button` 是「类 + 元素」（优先级 0-1-1），任何单个类（0-1-0）都压不过它，
+   卡片里第二个按钮想要另一套尺寸就只能靠更长的选择器或 !important。
+   `.stale-action` 当初正是这么栽的：它写的 width / height / margin / font-size 四条全部落败，
+   于是「重新加载」被撑成整行宽又不许收缩，把说明文字挤成一列汉字，自己捅出卡片外。
+   同理 `font` 简写也不能进这条规则——它会一并设定 font-size，那就是同一个陷阱的下一个入口。 */
 .site button {
-  width: 100%;
-  height: 36px;
-  margin-top: 11px;
-  font: inherit;
-  font-size: 13px;
+  font-family: inherit;
   font-weight: 650;
+  line-height: 1.6;
   color: #1b1d21;
   cursor: pointer;
   background: var(--mt-yellow);
@@ -221,6 +222,14 @@ body {
 
 .site button:hover { background: var(--mt-yellow-press); }
 .site button:active { transform: scale(0.985); }
+
+/* 主操作：整行一块，是这张卡片的落点。 */
+.site-action {
+  width: 100%;
+  height: 36px;
+  margin-top: 11px;
+  font-size: 13px;
+}
 
 /* ---------- 开关 ---------- */
 
