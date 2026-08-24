@@ -94,6 +94,24 @@ Vitest 能以 `environment: 'node'` 跑主力测试的前提，别为了图方�
   否则「写计数 → 重新注册」会成环。
 - **注册同步失败必须写进 session 并在 popup 上如实显示**（`shared/sync-error.ts`）。
   静默失败叠加错误汇报——popup 照着设置显示「已拦截」而其实没在拦——是这个扩展最坏的状态。
+- **popup 的站点状态必须来自实测，不能由设置推导**（`popup/page-status.ts`）。
+  注入脚本只在文档加载时进入页面，没有追溯力：刚装上扩展、刚把开关拨回开、刚把域名移出白名单时，
+  当前这个已经加载完的页面里根本没有补丁。popup 因此要实测（`isPageBlocked` 在 MAIN world 里
+  查 `RTCPeerConnection` 是不是原生实现），与设置对不上就显示「需重新加载」。
+  探测**不许 `new` 一个来试**：那会触发补丁的遥测，把「开了一下 popup」记成一次拦截。
+- **popup 改完设置后必须走请求-应答确认同步结果**（`shared/messages.ts` 的 `SyncRequest`）。
+  `storage.onChanged` 触发的同步是浮动 Promise，保存后立刻读 session 读到的是**上一次**的结果——
+  这次改动恰好把注册搞坏时，红条不会出现。应答读不懂时要显示「无法确认」，不许降级成「没问题」。
+- **同步必须串行**（`background/wiring.ts` 里的 `queue`）。reconcile 是「先读实际注册状态、再据此增删」，
+  两次同步交叠时后一次会读到改到一半的状态：轻则重复注册同一个 id 被拒（报出并不存在的失败），
+  重则把前一次刚注册的脚本当成多余的注销掉。
+- **Service Worker 每次唤醒都会跑冷启动自检**（`needsRepair`），所以它必须只读、只在真失衡时动手：
+  每个标签页的每次导航都会唤醒 SW，无条件重注册的代价太大。
+- **`test-pages/escape.html` 里的首行内联探针必须保持为文档的第一个脚本。**
+  其余各行只能证明补丁最终在位，只有它能证明补丁赶在了页面自己的代码之前。
+- **Worker 是覆盖边界，不是待修的 bug。** MV3 没有任何机制能往 Worker 的全局作用域注入代码；
+  今天不出事只因为 `RTCPeerConnection` 是 `[Exposed=Window]`。escape.html 的 Worker 哨兵行
+  读法与其余各行相反：显示「已拦截」才是符合预期的现状。
 - **React 只允许出现在 `src/popup/**`**；`injected` / `relay` / `background` 不得引入框架依赖。
 - reconcile 每次都以浏览器实际注册状态为准，已存在的一律走 `update`（哪怕内容没变）；
   执行顺序**先注销再注册**，否则复用同一 id 时 register 会因 id 已存在而失败。

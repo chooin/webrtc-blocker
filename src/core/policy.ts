@@ -67,3 +67,21 @@ export function reconcile(
     unregister: [...current].filter((id) => !desiredIds.has(id)),
   };
 }
+
+/**
+ * 注册状态是否已经和设置对不上了，需要整轮重新同步。
+ *
+ * Service Worker 每次被唤醒都会跑一次自检，所以这个判断必须只读、且要便宜：
+ * 无条件重新注册意味着每个标签页的每次导航都触发一轮 update，代价太大。
+ *
+ * 只看「该在的不在」和「不该在的还在」。`reconcile` 刻意把所有已存在的 id 放进
+ * update（哪怕内容没变），所以 update 非空是常态，不能拿它当失衡的证据——
+ * 拿它当证据的话，这个函数会永远返回 true，自检就退化成了无条件重注册。
+ */
+export function needsRepair(
+  currentIds: readonly string[],
+  desired: readonly RegistrationSpec[],
+): boolean {
+  const plan = reconcile(currentIds, desired);
+  return plan.register.length > 0 || plan.unregister.length > 0;
+}

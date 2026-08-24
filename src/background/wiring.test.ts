@@ -1,4 +1,4 @@
-import { BLOCK_EVENT_SOURCE } from '../shared/messages';
+import { BLOCK_EVENT_SOURCE, createSyncRequest } from '../shared/messages';
 import { SYNC_ERROR_KEY, readSyncError } from '../shared/sync-error';
 import { RTC_SCRIPT_ID } from '../core/policy';
 import { counterKey } from './counter';
@@ -9,6 +9,13 @@ interface FailureOptions {
   registerError?: string;
   /** setBadgeText 报错，模拟对已关闭标签页写角标时的 `No tab with id: N.`。 */
   badgeError?: string;
+  /** 预置浏览器侧已有的注册，用来构造「冷启动时注册还在 / 已经丢了」两种局面。 */
+  initialRegistered?: { id: string }[];
+  /**
+   * 让 scripting 的每个写操作在开始与结束之间让出一轮事件循环，
+   * 并各记一条标记。两次同步若交叠，标记会穿插，序列一看便知。
+   */
+  traceAsync?: boolean;
 }
 
 function fakeEnv(options: FailureOptions = {}) {
@@ -21,11 +28,15 @@ function fakeEnv(options: FailureOptions = {}) {
     },
   });
 
+  const yieldIfTracing = async () => {
+    if (options.traceAsync === true) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
   const settingsStore: Record<string, unknown> = {};
   const sessionStore: Record<string, unknown> = {};
   const calls: string[] = [];
   const badges: { tabId?: number; text: string }[] = [];
-  let registered: { id: string }[] = [];
+  let registered: { id: string }[] = options.initialRegistered ?? [];
 
   const env = {
     onInstalled: listen('onInstalled'),
@@ -65,13 +76,19 @@ function fakeEnv(options: FailureOptions = {}) {
       registerContentScripts: async (s: { id: string }[]) => {
         if (options.registerError !== undefined) throw new Error(options.registerError);
         calls.push(`register:${s.map((x) => x.id).join(',')}`);
+        await yieldIfTracing();
         registered = [...registered, ...s.map((x) => ({ id: x.id }))];
+        if (options.traceAsync === true) calls.push('register:end');
       },
       updateContentScripts: async () => {
         calls.push('update');
+        await yieldIfTracing();
+        if (options.traceAsync === true) calls.push('update:end');
       },
       unregisterContentScripts: async () => {
         calls.push('unregister');
+        await yieldIfTracing();
+        if (options.traceAsync === true) calls.push('unregister:end');
       },
     },
     ipPolicy: {
@@ -87,7 +104,12 @@ function fakeEnv(options: FailureOptions = {}) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
-  return { env, fire, calls, badges, sessionStore };
+  /** 同步链上有多个 await，单次让出不够；反复让出直到副作用落定。 */
+  const settle = async () => {
+    for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  return { env, fire, settle, calls, badges, sessionStore };
 }
 
 describe('installListeners', () => {
@@ -113,10 +135,14 @@ describe('installListeners', () => {
   });
 
   it('session 区域的变化不触发同步，避免计数写入引起注册风暴', async () => {
-    const { env, fire, calls } = fakeEnv();
+    // 冷启动自检本身会同步一次，所以断言的是「这个事件之后没有新增调用」，
+    // 而不是「一条调用都没有」。
+    const { env, fire, settle, calls } = fakeEnv();
     installListeners(env);
+    await settle();
+    const before = calls.length;
     await fire('onStorageChanged', {}, 'session');
-    expect(calls).toEqual([]);
+    expect(calls).toHaveLength(before);
   });
 
   it('收到合法遥测消息时给对应标签页计数', async () => {
@@ -246,5 +272,91 @@ describe('installListeners 的同步失败上报', () => {
     installListeners(env);
     await fire('onInstalled');
     await expect(readSyncError(env.session)).resolves.toBeNull();
+  });
+});
+
+describe('Service Worker 冷启动自检', () => {
+  it('注册丢失时，不等任何事件就补回来', async () => {
+    // onInstalled 只在安装/更新时触发，onStartup 只在浏览器启动时触发——
+    // 「扩展被禁用后重新启用」两个都不会来，注册若在此期间丢了就再也补不回来，
+    // 而且不会有任何报错：popup 照常显示「已拦截」，其实什么都没拦。
+    const { env, settle, calls } = fakeEnv({ initialRegistered: [] });
+    installListeners(env);
+    await settle();
+    expect(calls).toContain(`register:${RTC_SCRIPT_ID}`);
+  });
+
+  it('注册齐全时只读不写——每次唤醒都无条件重注册的代价太大', async () => {
+    const { env, settle, calls } = fakeEnv({ initialRegistered: [{ id: RTC_SCRIPT_ID }] });
+    installListeners(env);
+    await settle();
+    expect(calls).toEqual([]);
+  });
+
+  it('残留了不该在的注册时同样会修', async () => {
+    const { env, settle, calls } = fakeEnv({
+      initialRegistered: [{ id: RTC_SCRIPT_ID }, { id: 'stale-from-old-version' }],
+    });
+    installListeners(env);
+    await settle();
+    expect(calls).toContain('unregister');
+  });
+});
+
+describe('popup 发起的同步请求', () => {
+  const fromPopup = {}; // 扩展自身页面发来的消息没有 tab 上下文
+
+  it('应答里带回的是这次同步的结果，而不是上一次留下的记录', async () => {
+    const { env, fire, settle } = fakeEnv();
+    installListeners(env);
+    await settle();
+    const answered = new Promise((resolve) => {
+      void fire('onMessage', createSyncRequest(), fromPopup, resolve);
+    });
+    expect(await answered).toEqual({ error: null });
+  });
+
+  it('这次同步失败时如实带回失败原因', async () => {
+    const { env, fire, settle } = fakeEnv({ registerError: '非法的 match pattern' });
+    installListeners(env);
+    await settle();
+    const answered = new Promise((resolve) => {
+      void fire('onMessage', createSyncRequest(), fromPopup, resolve);
+    });
+    expect(await answered).toEqual({ error: '非法的 match pattern' });
+  });
+
+  it('带 tab 上下文的同步请求被忽略——这条通道只对扩展自己开放', async () => {
+    const { env, fire, settle, calls } = fakeEnv({ initialRegistered: [{ id: RTC_SCRIPT_ID }] });
+    installListeners(env);
+    await settle();
+    let answered = false;
+    await fire('onMessage', createSyncRequest(), { tab: { id: 7 } }, () => {
+      answered = true;
+    });
+    await settle();
+    expect(answered).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('同步的串行化', () => {
+  it('两次同步不会交叠——reconcile 读的必须是上一次改完之后的状态', async () => {
+    // 交叠的后果是实打实的：后一次读到前一次改到一半的注册状态，
+    // 轻则重复注册同一个 id 被 Chrome 拒绝（报出一个并不存在的失败），
+    // 重则把前一次刚注册好的脚本当成多余的注销掉。
+    const { env, fire, settle, calls } = fakeEnv({
+      initialRegistered: [{ id: RTC_SCRIPT_ID }],
+      traceAsync: true,
+    });
+    installListeners(env);
+    await settle();
+
+    void fire('onStorageChanged', {}, 'local');
+    void fire('onStorageChanged', {}, 'local');
+    await settle();
+
+    const updates = calls.filter((c) => c.startsWith('update'));
+    expect(updates).toEqual(['update', 'update:end', 'update', 'update:end']);
   });
 });

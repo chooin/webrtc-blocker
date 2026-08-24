@@ -4,6 +4,7 @@ import {
   RTC_SCRIPT_ID,
   desiredRegistrations,
   ipHandlingPolicy,
+  needsRepair,
   reconcile,
 } from './policy';
 
@@ -117,5 +118,43 @@ describe('reconcile', () => {
     const plan = reconcile([RTC_SCRIPT_ID, MEDIA_SCRIPT_ID], desiredRegistrations(settings()));
     expect(plan.unregister).toEqual([MEDIA_SCRIPT_ID]);
     expect(plan.update.map((s) => s.id)).toEqual([RTC_SCRIPT_ID]);
+  });
+});
+
+describe('needsRepair', () => {
+  const desired = desiredRegistrations({ enabled: true, blockMedia: true, whitelist: [] });
+
+  it('该在的都在时不需要修复', () => {
+    expect(needsRepair([RTC_SCRIPT_ID, MEDIA_SCRIPT_ID], desired)).toBe(false);
+  });
+
+  it('注册整个丢了时需要修复', () => {
+    expect(needsRepair([], desired)).toBe(true);
+  });
+
+  it('少了一个也需要修复', () => {
+    expect(needsRepair([RTC_SCRIPT_ID], desired)).toBe(true);
+  });
+
+  it('多出不该在的注册同样需要修复——那是上一版设置的残留', () => {
+    expect(needsRepair([RTC_SCRIPT_ID, MEDIA_SCRIPT_ID, 'stale'], desired)).toBe(true);
+  });
+
+  it('关掉拦截后仍有注册残留时需要修复', () => {
+    expect(needsRepair([RTC_SCRIPT_ID], [])).toBe(true);
+  });
+
+  it('关掉拦截且已无残留时不需要修复', () => {
+    expect(needsRepair([], [])).toBe(false);
+  });
+
+  it('内容变了但 id 齐全时不算失衡——那是 update 的活，不该触发整轮重注册', () => {
+    // reconcile 把已存在的 id 一律放进 update，所以 update 非空不能当作失衡的证据。
+    const narrowed = desiredRegistrations({
+      enabled: true,
+      blockMedia: true,
+      whitelist: ['example.com'],
+    });
+    expect(needsRepair([RTC_SCRIPT_ID, MEDIA_SCRIPT_ID], narrowed)).toBe(false);
   });
 });

@@ -23,6 +23,11 @@
   --track: #dbdee3;
   --ok: #0e9f6e;
 
+  /* 「设置与实际对不上」用琥珀色：它比正常状态要紧，但没到「扩展根本没在拦」那一级，
+     不该和通栏实心红抢同一个分量。 */
+  --warn: #b54708;
+  --warn-bg: #fff4e5;
+
   /* 警告条是通栏实心红：淡红底在浅灰底上对比度不够，只有实心色块压得住。 */
   --danger-bg: #d92d20;
   --danger-ink: #ffffff;
@@ -43,6 +48,9 @@
 
     --track: #3a3d42;
     --ok: #34d399;
+
+    --warn: #fbbf24;
+    --warn-bg: #33291a;
 
     --danger-bg: #c8342a;
   }
@@ -153,6 +161,35 @@ body {
    「已放行」不是错误，只是没在保护，配中性灰。原先的红绿是反的。 */
 .state-blocked { color: var(--ok); }
 .state-allowed { color: var(--ink-3); }
+
+/* 「需重新加载」是设置与实际对不上——要显眼，但重新加载一下就好。
+   「无法确认」走中性灰：它不是坏消息，只是没有消息，不该被读成告警。 */
+.state-stale { color: var(--warn); }
+.state-unknown { color: var(--ink-3); }
+
+.stale {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 9px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--warn-bg);
+  border-radius: 8px;
+}
+
+.stale span { flex: 1; }
+
+/* .site button 那条规则会把这个按钮也撑成整行的主操作，逐项按回来。 */
+.stale-action {
+  flex: none;
+  width: auto;
+  height: auto;
+  padding: 5px 10px;
+  margin: 0;
+  font-size: 12px;
+}
 
 .count {
   margin: 10px 0 0;
