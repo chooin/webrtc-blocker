@@ -1,7 +1,18 @@
 // 生成 src/icons/icon-{16,32,48,128}.png。
 //
-// 不引入任何图形库：图标是四个固定尺寸的纯色圆角方块加一个「被切断的对等连接」，
-// 用 zlib 手写一份最小合法 PNG 比拉一个依赖便宜得多，而且结果可复现。
+// 图形是 WebRTC 官方标志（五个彩色圆排成正五边形，中间压一个白色对话气泡），
+// 外加一道阻断斜杠——这是个拦截器，图标不能只说「这里有 WebRTC」。
+//
+// 官方标志版权与授权：
+//   Copyright The WebRTC project authors.
+//   3-clause BSD License —— https://webrtc.org/license/
+//   出处 https://webrtc.org/press/
+// BSD 允许再分发与修改，条件是保留上面这段声明；README 里另有一份面向使用者的说明。
+// 本文件不含官方 SVG 的任何代码，只按其几何参数重建：五个圆的圆心、半径、
+// 气泡的圆角矩形与尾巴顶点，都是从官方 SVG 的 path 与 transform 里解出来的。
+//
+// 不引入任何图形库：这些都是圆、圆角矩形与三角形，用 zlib 手写一份最小合法 PNG
+// 比拉一个依赖便宜得多，而且结果可复现。
 // 产物已提交进仓库，改动图形时手动跑 `node scripts/make-icons.mjs` 重新生成。
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -11,100 +22,121 @@ import { crc32, deflateSync } from 'node:zlib';
 const outDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'icons');
 const SIZES = [16, 32, 48, 128];
 
-const BG = [0x16, 0x21, 0x3e]; // 深藏蓝：浅色与深色工具栏上都站得住
-const FG = [0xff, 0xff, 0xff];
+/*
+ * 以下坐标全部沿用官方 SVG 的单位，原点取五圆簇的形心。
+ * 官方文件里每个圆都写成 `m0 0 c…`（圆心在各自局部坐标的 (-13.641, 0)、半径 13.642），
+ * 真实位置在父级 <g> 的 matrix 上，这里已经把两级 transform 乘开了。
+ */
+const CIRCLE_RADIUS = 53.86;
+const CIRCLES = [
+  // 顺序即绘制顺序，与官方 SVG 一致：后画的压在先画的上面。
+  { cx: -40.94, cy: 55.3, color: [0xff, 0x66, 0x00] }, // 橙 #f60
+  { cx: 65.59, cy: -20.11, color: [0xff, 0xcc, 0x00] }, // 黄 #fc0
+  { cx: -66.07, cy: -21.3, color: [0x00, 0x89, 0xcc] }, // 蓝 #0089cc
+  { cx: 41.65, cy: 55.3, color: [0x00, 0x99, 0x39] }, // 绿 #009939
+  { cx: -0.24, cy: -69.18, color: [0xbf, 0x00, 0x00] }, // 红 #bf0000
+];
 
-/** 圆角矩形的有符号距离场，p 为相对中心的坐标。 */
-function roundedRect(px, py, half, radius) {
-  const qx = Math.abs(px) - (half - radius);
-  const qy = Math.abs(py) - (half - radius);
-  const ox = Math.max(qx, 0);
-  const oy = Math.max(qy, 0);
-  return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - radius;
-}
-
-/** 实心圆。 */
-function circle(px, py, cx, cy, radius) {
-  return Math.hypot(px - cx, py - cy) - radius;
-}
-
-/** 胶囊：从 a 到 b 的线段外扩 halfWidth，两端是圆头。 */
-function capsule(px, py, ax, ay, bx, by, halfWidth) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const t = Math.min(Math.max(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy), 0), 1);
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy)) - halfWidth;
-}
-
-/** 45° 斜杠：把坐标转回轴对齐后按矩形算。 */
-function slash(px, py, halfLength, halfWidth) {
-  const c = Math.SQRT1_2;
-  const rx = c * px + c * py;
-  const ry = -c * px + c * py;
-  return Math.max(Math.abs(rx) - halfLength, Math.abs(ry) - halfWidth);
-}
+// 白色对话气泡：圆角矩形 + 左下角的尾巴。
+const BALLOON = { x0: -70.75, y0: -54.54, x1: 61.88, y1: 48.63, radius: 13.42 };
+const BALLOON_TAIL = [
+  [12.4, 48.63],
+  [-59.82, 84.03],
+  [-48.84, 48.63],
+];
+const WHITE = [0xff, 0xff, 0xff];
 
 /*
- * 图形：两个对等节点连成一条线，被一道 45° 斜杠切断。
- *
- * 连线走 ↗ 对角线、斜杠走 ↘ 对角线，两者正交——这是这块画布上能给到的最大角度差。
- * 之前把连线放在水平方向试过，与斜杠只差 45°，16px 上两条线糊成一团分不出谁是谁。
- * 节点也因此能沿对角线放到更外面：正方形的对角比水平方向长 41%，那段余量本来是浪费的。
- *
- * 连线不画成整条再挖背景色，而是直接画成断开的两截——几何结果一样，
- * 但不需要「背景色」这个概念，App.tsx 里的 SVG 版才能照抄同一组坐标。
- * 所有长度都按 size 取比例，四个尺寸出来的是同一个图形，不是四张各画各的。
+ * 阻断斜杠。半长刻意收在 100（而不是图形最外沿的 123）：
+ * 背景是透明的，斜杠一旦伸出彩色圆之外，那一截在深色工具栏上就消失了。
+ * 收进来之后它整条都压在不透明像素上，浅色深色工具栏下都完整。
  */
-const NODE_DISTANCE = 0.4; // 节点圆心沿 ↗ 对角线到中心的距离
-const NODE_RADIUS = 0.105;
-const LINK_HALF_WIDTH = 0.042;
-const LINK_INNER = 0.105; // 连线内端到中心的距离：正好给斜杠让出断口
-const SLASH_HALF_LENGTH = 0.36;
-const SLASH_HALF_WIDTH = 0.058;
+const SLASH_HALF_LENGTH = 100;
+const SLASH_HALF_WIDTH = 13.5;
+const SLASH_COLOR = [0x1b, 0x1d, 0x21];
 
-/** 每像素 8×8 超采样，纯手工抗锯齿。 */
+// 图形的包围盒不是以形心对称的（上 123.04、下 109.16），画布要按包围盒居中。
+const CENTER_Y = -6.94;
+const HALF_EXTENT = 119.69;
+/** 图形占画布的比例，两侧各留约 4% 边距。 */
+const FILL = 0.46;
+
+const circle = (px, py, cx, cy, r) => Math.hypot(px - cx, py - cy) - r;
+
+/** 任意宽高的圆角矩形。 */
+function roundedRect(px, py, box) {
+  const halfW = (box.x1 - box.x0) / 2;
+  const halfH = (box.y1 - box.y0) / 2;
+  const qx = Math.abs(px - (box.x0 + halfW)) - (halfW - box.radius);
+  const qy = Math.abs(py - (box.y0 + halfH)) - (halfH - box.radius);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - box.radius;
+}
+
+/** 三角形内外判定：三条边的叉积同号即在内部。 */
+function inTriangle(px, py, tri) {
+  const side = (ax, ay, bx, by, cx, cy) => (ax - cx) * (by - cy) - (bx - cx) * (ay - cy);
+  const d1 = side(px, py, tri[0][0], tri[0][1], tri[1][0], tri[1][1]);
+  const d2 = side(px, py, tri[1][0], tri[1][1], tri[2][0], tri[2][1]);
+  const d3 = side(px, py, tri[2][0], tri[2][1], tri[0][0], tri[0][1]);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
+/** 45° 斜杠（↘ 方向，标准禁止符的方向）：把坐标转回轴对齐后按矩形算。 */
+function inSlash(px, py) {
+  const c = Math.SQRT1_2;
+  return (
+    Math.abs(c * px + c * py) < SLASH_HALF_LENGTH && Math.abs(-c * px + c * py) < SLASH_HALF_WIDTH
+  );
+}
+
+/** 某个采样点最终是什么颜色；落在图形之外返回 null（透明）。 */
+function sampleColor(px, py) {
+  let color = null;
+  for (const item of CIRCLES) {
+    if (circle(px, py, item.cx, item.cy, CIRCLE_RADIUS) < 0) color = item.color;
+  }
+  if (roundedRect(px, py, BALLOON) < 0 || inTriangle(px, py, BALLOON_TAIL)) color = WHITE;
+  if (inSlash(px, py)) color = SLASH_COLOR;
+  return color;
+}
+
+/**
+ * 每像素 8×8 超采样，纯手工抗锯齿。
+ *
+ * 背景透明，所以颜色要按**命中的样本**取平均、alpha 按覆盖率取——
+ * 拿全部样本去平均的话，边缘会朝黑色渗，深色工具栏上尤其明显。
+ */
 function renderRgba(size) {
   const S = 8;
   const half = size / 2;
-  const radius = size * 0.22;
-  // ↗ 方向上的单位分量：y 轴向下，所以往右上走是 x 加、y 减。
-  const nodeX = size * NODE_DISTANCE * Math.SQRT1_2;
-  const linkX = size * LINK_INNER * Math.SQRT1_2;
-  const nodeRadius = size * NODE_RADIUS;
-  const linkHalfWidth = size * LINK_HALF_WIDTH;
-  const slashHalfLength = size * SLASH_HALF_LENGTH;
-  const slashHalfWidth = size * SLASH_HALF_WIDTH;
+  const scale = (size * FILL) / HALF_EXTENT;
   const pixels = Buffer.alloc(size * size * 4);
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      let bgHits = 0;
-      let fgHits = 0;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let hits = 0;
       for (let sy = 0; sy < S; sy += 1) {
         for (let sx = 0; sx < S; sx += 1) {
-          const px = x + (sx + 0.5) / S - half;
-          const py = y + (sy + 0.5) / S - half;
-          if (roundedRect(px, py, half, radius) < 0) bgHits += 1;
-          const inMark =
-            circle(px, py, -nodeX, nodeX, nodeRadius) < 0 ||
-            circle(px, py, nodeX, -nodeX, nodeRadius) < 0 ||
-            capsule(px, py, -nodeX, nodeX, -linkX, linkX, linkHalfWidth) < 0 ||
-            capsule(px, py, linkX, -linkX, nodeX, -nodeX, linkHalfWidth) < 0 ||
-            slash(px, py, slashHalfLength, slashHalfWidth) < 0;
-          if (inMark) fgHits += 1;
+          const px = (x + (sx + 0.5) / S - half) / scale;
+          const py = (y + (sy + 0.5) / S - half) / scale + CENTER_Y;
+          const color = sampleColor(px, py);
+          if (color === null) continue;
+          r += color[0];
+          g += color[1];
+          b += color[2];
+          hits += 1;
         }
       }
-      const total = S * S;
-      const bg = bgHits / total;
-      const fg = Math.min(fgHits / total, bg);
-      const alpha = bg;
-      // 先把前景合成到背景上，再整体乘 alpha，避免圆角外缘出现白边。
-      const mix = alpha === 0 ? 0 : fg / alpha;
       const at = (y * size + x) * 4;
-      for (let c = 0; c < 3; c += 1) {
-        pixels[at + c] = Math.round(BG[c] * (1 - mix) + FG[c] * mix);
+      if (hits > 0) {
+        pixels[at] = Math.round(r / hits);
+        pixels[at + 1] = Math.round(g / hits);
+        pixels[at + 2] = Math.round(b / hits);
       }
-      pixels[at + 3] = Math.round(alpha * 255);
+      pixels[at + 3] = Math.round((hits / (S * S)) * 255);
     }
   }
   return pixels;

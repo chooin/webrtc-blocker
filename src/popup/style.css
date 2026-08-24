@@ -79,21 +79,20 @@ body {
   padding: 12px 14px 10px;
 }
 
+/* 官方标志自带颜色，不再套黄色圆角方块：那层底会和标志本身的五个彩色圆打架，
+   而且黄色在这个界面里另有职责（品牌 / 可点击），不该同时又当容器。 */
 .brand-mark {
   display: grid;
   flex: none;
   place-items: center;
-  width: 19px;
-  height: 19px;
-  background: var(--mt-yellow);
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
 }
 
 .brand-mark svg {
   display: block;
-  width: 12px;
-  height: 12px;
-  color: #1b1d21; /* 黄底上只能压近黑字：白字对比度不足 2:1。 */
+  width: 20px;
+  height: 20px;
 }
 
 .brand-name {

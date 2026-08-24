@@ -28,22 +28,26 @@ export interface PopupApi {
 }
 
 /**
- * 品牌栏里的图形：两个对等节点连成一条线，被一道 45° 斜杠切断。
- * 与 scripts/make-icons.mjs 画的工具栏图标是同一组几何，坐标按 viewBox 24 换算——
- * 节点距中心 0.40、半径 0.105、连线半宽 0.042、断口 0.105、斜杠半长 0.36 半宽 0.058。
+ * 品牌栏里的图形：WebRTC 官方标志加一道阻断斜杠，与工具栏图标是同一组几何。
+ *
+ * 官方标志版权归 The WebRTC project authors，依 3-clause BSD 授权
+ * （https://webrtc.org/license/，出处 https://webrtc.org/press/）。
+ * 坐标由 scripts/make-icons.mjs 里那组官方几何按 viewBox 24 换算而来，
  * 那边改了比例，这里要跟着换算，否则工具栏和 popup 会显示成两个不一样的标志。
+ *
+ * 这里刻意不吃 currentColor：官方标志是多色的，跟着文字颜色走就不是它了。
  */
 function BrandGlyph() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <circle cx="5.21" cy="18.79" r="2.52" fill="currentColor" />
-      <circle cx="18.79" cy="5.21" r="2.52" fill="currentColor" />
-      <path
-        d="M5.21 18.79L10.22 13.78M13.78 10.22L18.79 5.21"
-        strokeWidth="2.02"
-        strokeLinecap="round"
-      />
-      <path d="M5.89 5.89L18.11 18.11" strokeWidth="2.78" />
+    <svg viewBox="0 0 24 24">
+      <circle cx="8.224" cy="17.741" r="4.968" fill="#f60" />
+      <circle cx="18.05" cy="10.785" r="4.968" fill="#fc0" />
+      <circle cx="5.906" cy="10.675" r="4.968" fill="#0089cc" />
+      <circle cx="15.842" cy="17.741" r="4.968" fill="#009939" />
+      <circle cx="11.978" cy="6.259" r="4.968" fill="#bf0000" />
+      <rect x="5.474" y="7.609" width="12.234" height="9.516" rx="1.238" fill="#fff" />
+      <path d="M13.144 17.126L6.482 20.391L7.495 17.126Z" fill="#fff" />
+      <path d="M5.478 6.118L18.522 19.162" stroke="#1b1d21" strokeWidth="2.49" />
     </svg>
   );
 }

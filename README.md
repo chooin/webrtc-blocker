@@ -74,3 +74,18 @@ Service Worker 依据设置，用 `chrome.scripting.registerContentScripts` 决�
 此时扩展**没有在拦截**，横幅上的原因就是排查起点，其余各条验收都无从谈起。
 横幅显示「无法确认拦截是否生效」时同样不能继续：那代表 popup 连 Service Worker 都没问到，
 状态是未知而不是正常。
+
+## 图标署名
+
+工具栏图标与 popup 品牌栏的图形，基于 **WebRTC 官方标志**（五个彩色圆排成正五边形，
+中间压一个白色对话气泡），外加一道阻断斜杠——这是个拦截器，图标不该只说「这里有 WebRTC」。
+
+> Copyright The WebRTC project authors.
+> 依 3-clause BSD License 授权：<https://webrtc.org/license/>
+> 标志出处：<https://webrtc.org/press/>
+
+BSD 允许再分发与修改，条件是保留上面这段版权声明。本仓库没有复制官方 SVG 的任何代码，
+`scripts/make-icons.mjs` 是按其几何参数（五个圆的圆心与半径、气泡圆角矩形与尾巴顶点）
+重建的；那些参数是从官方 SVG 的 path 与 transform 里解出来的。
+
+**这个扩展与 WebRTC 项目没有任何隶属关系，也未获其背书。**

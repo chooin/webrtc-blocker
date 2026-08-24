@@ -109,6 +109,12 @@ Vitest 能以 `environment: 'node'` 跑主力测试的前提，别为了图方�
   每个标签页的每次导航都会唤醒 SW，无条件重注册的代价太大。
 - **`test-pages/escape.html` 里的首行内联探针必须保持为文档的第一个脚本。**
   其余各行只能证明补丁最终在位，只有它能证明补丁赶在了页面自己的代码之前。
+- **图标图形是 WebRTC 官方标志（3-clause BSD）加一道阻断斜杠**，`scripts/make-icons.mjs`
+  与 `popup/App.tsx` 的 `BrandGlyph` 必须是同一组几何——那边改比例这里要跟着换算，
+  否则工具栏和 popup 会显示成两个不一样的标志。BSD 要求保留版权声明：
+  脚本头部与 README「图标署名」一节各有一份，删任何一份都是违反授权。
+  历史上这两处曾长期是镜像关系而无人发现（注释声称一致，但没有任何东西验证），
+  所以改完要用逐像素比对核实，别只靠肉眼。
 - **Worker 是覆盖边界，不是待修的 bug。** MV3 没有任何机制能往 Worker 的全局作用域注入代码；
   今天不出事只因为 `RTCPeerConnection` 是 `[Exposed=Window]`。escape.html 的 Worker 哨兵行
   读法与其余各行相反：显示「已拦截」才是符合预期的现状。
