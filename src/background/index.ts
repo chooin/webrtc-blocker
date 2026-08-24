@@ -33,7 +33,13 @@ installListeners({
   onTabRemoved: chrome.tabs.onRemoved,
   settingsArea: chrome.storage.local,
   session: chrome.storage.session,
-  badge: chrome.action,
+  action: chrome.action,
+  // 包一层而不是直接传 chrome.tabs：窄接口只要「读一个」和「列全部」两件事，
+  // query 的过滤条件是这一层的实现细节，不该出现在 TabsLike 里。
+  tabs: {
+    get: (tabId: number) => chrome.tabs.get(tabId),
+    list: () => chrome.tabs.query({}),
+  },
   scripting: chrome.scripting,
   ipPolicy,
 });

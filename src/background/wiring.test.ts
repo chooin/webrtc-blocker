@@ -32,10 +32,12 @@ function fakeEnv(options: FailureOptions = {}) {
     if (options.traceAsync === true) await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
+  const tabUrls: Record<number, string> = { 11: 'https://example.com/x', 12: 'https://other.test/' };
   const settingsStore: Record<string, unknown> = {};
   const sessionStore: Record<string, unknown> = {};
   const calls: string[] = [];
   const badges: { tabId?: number; text: string }[] = [];
+  const icons: { tabId?: number; gray: boolean }[] = [];
   let registered: { id: string }[] = options.initialRegistered ?? [];
 
   const env = {
@@ -65,11 +67,22 @@ function fakeEnv(options: FailureOptions = {}) {
         for (const k of Array.isArray(keys) ? keys : [keys]) delete sessionStore[k];
       },
     },
-    badge: {
+    action: {
       setBadgeText: async (d: { tabId?: number; text: string }) => {
         if (options.badgeError !== undefined) throw new Error(options.badgeError);
         badges.push(d);
       },
+      setBadgeBackgroundColor: async () => {},
+      setIcon: async (d: { tabId?: number; path: Record<number, string> }) => {
+        icons.push({ tabId: d.tabId, gray: String(d.path[16]).includes('gray') });
+      },
+    },
+    tabs: {
+      get: async (tabId: number) => {
+        if (!(tabId in tabUrls)) throw new Error(`No tab with id: ${tabId}.`);
+        return { url: tabUrls[tabId] };
+      },
+      list: async () => Object.entries(tabUrls).map(([id, url]) => ({ id: Number(id), url })),
     },
     scripting: {
       getRegisteredContentScripts: async () => registered,
@@ -109,7 +122,7 @@ function fakeEnv(options: FailureOptions = {}) {
     for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
-  return { env, fire, settle, calls, badges, sessionStore };
+  return { env, fire, settle, calls, badges, icons, sessionStore, tabUrls };
 }
 
 describe('installListeners', () => {
@@ -219,10 +232,14 @@ describe('installListeners', () => {
   });
 
   it('导航开始时仍然清空角标——那个标签页还活着', async () => {
-    const { env, fire, badges } = fakeEnv();
+    const { env, fire, badges, sessionStore } = fakeEnv();
     installListeners(env);
+    await fire('onMessage', { source: BLOCK_EVENT_SOURCE, api: 'RTCPeerConnection' }, { tab: { id: 11 } });
+    badges.length = 0;
     await fire('onTabUpdated', 11, { status: 'loading' });
-    expect(badges).toEqual([{ tabId: 11, text: '' }]);
+    // 导航后这个标签页会被按状态重画若干次，断言看最后一次：计数已清、角标随之为空。
+    expect(counterKey(11) in sessionStore).toBe(false);
+    expect(badges.at(-1)).toEqual({ tabId: 11, text: '' });
   });
 });
 
@@ -358,5 +375,84 @@ describe('同步的串行化', () => {
 
     const updates = calls.filter((c) => c.startsWith('update'));
     expect(updates).toEqual(['update', 'update:end', 'update', 'update:end']);
+  });
+});
+
+describe('工具栏状态', () => {
+  it('默认设置下是彩色图标：这个标签页正在被保护', async () => {
+    const { env, settle, icons, badges } = fakeEnv();
+    installListeners(env);
+    await settle();
+    expect(icons.at(-1)?.gray).toBe(false);
+    // 「正在拦」且还没拦到东西，角标留空——正常状态不该在工具栏上持续喊话。
+    expect(badges.at(-1)?.text).toBe('');
+  });
+
+  it('总开关关闭后，每个标签页都换成灰图标 + OFF', async () => {
+    const { env, fire, settle, icons, badges } = fakeEnv();
+    env.settingsArea.set({ enabled: false });
+    installListeners(env);
+    await settle();
+    icons.length = 0;
+    badges.length = 0;
+    await fire('onStorageChanged', {}, 'local');
+    await settle();
+    expect(icons.every((i) => i.gray)).toBe(true);
+    expect(new Set(badges.map((b) => b.text))).toEqual(new Set(['OFF']));
+    // 假环境里有两个标签页，两个都要重画——设置是全局的。
+    expect(new Set(badges.map((b) => b.tabId))).toEqual(new Set([11, 12]));
+  });
+
+  it('白名单站点是灰图标 + 破折号，与「总开关关了」区分得开', async () => {
+    const { env, settle, icons, badges } = fakeEnv();
+    env.settingsArea.set({ whitelist: ['example.com'] });
+    installListeners(env);
+    await settle();
+    const tab11 = badges.filter((b) => b.tabId === 11).at(-1);
+    const tab12 = badges.filter((b) => b.tabId === 12).at(-1);
+    expect(tab11?.text).toBe('—');
+    expect(tab12?.text).toBe('');
+    expect(icons.filter((i) => i.tabId === 11).at(-1)?.gray).toBe(true);
+    expect(icons.filter((i) => i.tabId === 12).at(-1)?.gray).toBe(false);
+  });
+
+  it('注入不了的页面是灰图标 + 空角标，不能写成 OFF', async () => {
+    // 写 OFF 会被读成「是我关的开关」，而那类页面开着也一样不工作。
+    const { env, fire, settle, icons, badges, tabUrls } = fakeEnv();
+    tabUrls[11] = 'chrome://extensions/';
+    installListeners(env);
+    await settle();
+    icons.length = 0;
+    badges.length = 0;
+    await fire('onTabUpdated', 11, { status: 'complete' });
+    expect(icons.at(-1)?.gray).toBe(true);
+    expect(badges.at(-1)?.text).toBe('');
+  });
+
+  it('拦到东西后角标显示计数', async () => {
+    const { env, fire, settle, badges } = fakeEnv();
+    installListeners(env);
+    await settle();
+    await fire('onMessage', { source: BLOCK_EVENT_SOURCE, api: 'RTCPeerConnection' }, { tab: { id: 11 } });
+    await settle();
+    expect(badges.at(-1)).toEqual({ tabId: 11, text: '1' });
+  });
+
+  it('重画途中某个标签页恰好关闭，不该连累其余标签页', async () => {
+    // 列出标签页与逐个重画之间总有时间差，Chrome 会以 `No tab with id: N.` 拒绝。
+    // 这是每关一个标签页就可能发生一次的事，不能让它把整轮重画中断掉。
+    const { env, fire, settle, badges } = fakeEnv();
+    installListeners(env);
+    await settle();
+    const original = env.action.setIcon;
+    env.action.setIcon = async (d: { tabId?: number; path: Record<number, string> }) => {
+      if (d.tabId === 11) throw new Error('No tab with id: 11.');
+      return original(d);
+    };
+    badges.length = 0;
+    await fire('onStorageChanged', {}, 'local');
+    await settle();
+    expect(badges.map((b) => b.tabId)).toContain(12);
+    expect(badges.map((b) => b.tabId)).not.toContain(11);
   });
 });

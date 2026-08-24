@@ -115,6 +115,14 @@ Vitest 能以 `environment: 'node'` 跑主力测试的前提，别为了图方�
   脚本头部与 README「图标署名」一节各有一份，删任何一份都是违反授权。
   历史上这两处曾长期是镜像关系而无人发现（注释声称一致，但没有任何东西验证），
   所以改完要用逐像素比对核实，别只靠肉眼。
+- **工具栏的图标与 badge 只能由 `background/action.ts` 的 `refreshAction` 写**，别处一概不写。
+  计数与状态两个写入者各写各的，「OFF」会被下一次计数更新抹成空——`counter.ts` 因此
+  收窄成只管计数，连 `ActionLike` 都拿不到。
+- **`core/action-state.ts` 只按设置判定，不做实测**，所以它认不出「改完设置但页面没重新加载」
+  那一格——那一格由 popup 的实测承担（`page-status.ts`）。别把两者的职责混起来。
+- **灰度图标路径写在 `core/icon-files.ts`**（同样不许 import）。它们不在 manifest 里，
+  是运行时用 `chrome.action.setIcon` 换上去的，少了这份单一来源，改名只会在用户
+  关掉开关的那一刻静默失败。`build.mjs` 的产物断言已覆盖两组图标。
 - **Worker 是覆盖边界，不是待修的 bug。** MV3 没有任何机制能往 Worker 的全局作用域注入代码；
   今天不出事只因为 `RTCPeerConnection` 是 `[Exposed=Window]`。escape.html 的 Worker 哨兵行
   读法与其余各行相反：显示「已拦截」才是符合预期的现状。

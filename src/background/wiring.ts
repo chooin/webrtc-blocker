@@ -1,14 +1,12 @@
+import { actionState } from '../core/action-state';
+import { pageHost } from '../core/page-host';
 import { desiredRegistrations, needsRepair } from '../core/policy';
+import type { Settings } from '../core/types';
 import { isBlockEvent, isSyncRequest, type SyncResult } from '../shared/messages';
 import { getSettings, type SettingsArea } from '../shared/settings';
 import { clearSyncError, errorMessage, recordSyncError } from '../shared/sync-error';
-import {
-  forgetTab,
-  recordBlock,
-  resetTab,
-  type BadgeLike,
-  type SessionArea,
-} from './counter';
+import { refreshAction, type ActionLike } from './action';
+import { forgetTab, readCount, recordBlock, resetTab, type SessionArea } from './counter';
 import { syncBlocking, type IpPolicyLike, type ScriptingLike } from './sync';
 
 interface EventLike<Args extends unknown[]> {
@@ -29,6 +27,12 @@ interface MessageEventLike {
   ): void;
 }
 
+/** 只声明用得到的方法：状态判定要 url，设置一变则要遍历全部标签页逐个重画。 */
+export interface TabsLike {
+  get(tabId: number): Promise<{ url?: string }>;
+  list(): Promise<{ id?: number; url?: string }[]>;
+}
+
 export interface BackgroundEnv {
   onInstalled: EventLike<[]>;
   onStartup: EventLike<[]>;
@@ -38,7 +42,8 @@ export interface BackgroundEnv {
   onTabRemoved: EventLike<[number]>;
   settingsArea: SettingsArea;
   session: SessionArea;
-  badge: BadgeLike;
+  action: ActionLike;
+  tabs: TabsLike;
   scripting: ScriptingLike;
   ipPolicy: IpPolicyLike;
 }
@@ -54,8 +59,39 @@ function run(task: Promise<unknown>, what: string): void {
 }
 
 export function installListeners(env: BackgroundEnv): void {
-  const counterDeps = { session: env.session, badge: env.badge };
   const syncDeps = { scripting: env.scripting, ipPolicy: env.ipPolicy };
+  const actionDeps = { action: env.action };
+
+  /*
+   * 工具栏的图标与 badge 全部由这里重画，别处一概不写——
+   * 计数与状态两个写入者各写各的，「OFF」会被下一次计数更新抹成空。
+   */
+  const paintOne = async (
+    tabId: number,
+    url: string | undefined,
+    settings: Settings,
+  ): Promise<void> => {
+    const state = actionState(settings, pageHost(url ?? ''));
+    const count = await readCount(tabId, env.session);
+    await refreshAction(tabId, state, count, actionDeps);
+  };
+
+  const paint = async (tabId: number): Promise<void> => {
+    const tab = await env.tabs.get(tabId);
+    await paintOne(tabId, tab.url, await getSettings(env.settingsArea));
+  };
+
+  /** 设置一变，每个标签页的状态都可能跟着变，所以要全体重画。 */
+  const paintAll = async (): Promise<void> => {
+    const settings = await getSettings(env.settingsArea);
+    for (const tab of await env.tabs.list()) {
+      if (tab.id === undefined) continue;
+      // 其中一个标签页恰好关掉了，不该连累其余的，所以逐个兜住。
+      await paintOne(tab.id, tab.url, settings).catch(() => undefined);
+    }
+  };
+
+  const runPaintAll = (): void => run(paintAll(), '刷新工具栏状态失败');
 
   const syncOnce = async (): Promise<void> => {
     try {
@@ -100,12 +136,20 @@ export function installListeners(env: BackgroundEnv): void {
     await sync();
   };
 
-  env.onInstalled.addListener(runSync);
-  env.onStartup.addListener(runSync);
+  env.onInstalled.addListener(() => {
+    runSync();
+    runPaintAll();
+  });
+  env.onStartup.addListener(() => {
+    runSync();
+    runPaintAll();
+  });
 
   env.onStorageChanged.addListener((_changes, area) => {
     // 只认 local。计数写在 session，若一并响应会形成"写计数 → 重新注册"的循环。
-    if (area === 'local') runSync();
+    if (area !== 'local') return;
+    runSync();
+    runPaintAll();
   });
 
   env.onMessage.addListener((message, sender, sendResponse) => {
@@ -130,15 +174,30 @@ export function installListeners(env: BackgroundEnv): void {
     const tabId = sender.tab?.id;
     if (tabId === undefined) return;
     if (!isBlockEvent(message)) return;
-    run(recordBlock(tabId, counterDeps), '记录拦截计数失败');
+    run(
+      recordBlock(tabId, env.session).then(() => paint(tabId)),
+      '记录拦截计数失败',
+    );
   });
 
+  /*
+   * loading 与 complete 都要重画：loading 时 tabs.get 拿到的 url 可能还是上一个页面的，
+   * 那会让刚导航到白名单站点的标签页短暂显示成「正在拦」。complete 再画一次收口。
+   */
   env.onTabUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') run(resetTab(tabId, counterDeps), '重置标签页计数失败');
+    if (changeInfo.status === 'loading') {
+      run(
+        resetTab(tabId, env.session).then(() => paint(tabId)),
+        '重置标签页计数失败',
+      );
+    } else if (changeInfo.status === 'complete') {
+      run(paint(tabId), '刷新工具栏状态失败');
+    }
   });
 
   // 标签页已经不存在了，只能清存储；写角标必然被 Chrome 以 `No tab with id` 拒绝。
   env.onTabRemoved.addListener((tabId) => run(forgetTab(tabId, env.session), '清理标签页计数失败'));
 
   run(repairIfNeeded(), '冷启动自检失败，注册状态未知');
+  runPaintAll();
 }

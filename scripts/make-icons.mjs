@@ -89,11 +89,26 @@ function inSlash(px, py) {
   );
 }
 
+/*
+ * 灰度变体：总开关关闭、或本站在白名单里时，工具栏换成它。
+ *
+ * 只把五个圆去色，气泡的白与斜杠的近黑原样保留。整张图一起按亮度压灰的话，
+ * 深红圆（亮度约 41）会和斜杠（约 29）糊在一起，图形就散了。
+ * 压进 [120, 200] 这个窄区间也是同一个理由：留出与白气泡、与深色斜杠的对比。
+ */
+function toGray(color) {
+  const luma = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+  const level = Math.round(120 + (luma / 255) * 80);
+  return [level, level, level];
+}
+
 /** 某个采样点最终是什么颜色；落在图形之外返回 null（透明）。 */
-function sampleColor(px, py) {
+function sampleColor(px, py, gray) {
   let color = null;
   for (const item of CIRCLES) {
-    if (circle(px, py, item.cx, item.cy, CIRCLE_RADIUS) < 0) color = item.color;
+    if (circle(px, py, item.cx, item.cy, CIRCLE_RADIUS) < 0) {
+      color = gray ? toGray(item.color) : item.color;
+    }
   }
   if (roundedRect(px, py, BALLOON) < 0 || inTriangle(px, py, BALLOON_TAIL)) color = WHITE;
   if (inSlash(px, py)) color = SLASH_COLOR;
@@ -106,7 +121,7 @@ function sampleColor(px, py) {
  * 背景透明，所以颜色要按**命中的样本**取平均、alpha 按覆盖率取——
  * 拿全部样本去平均的话，边缘会朝黑色渗，深色工具栏上尤其明显。
  */
-function renderRgba(size) {
+function renderRgba(size, gray) {
   const S = 8;
   const half = size / 2;
   const scale = (size * FILL) / HALF_EXTENT;
@@ -122,7 +137,7 @@ function renderRgba(size) {
         for (let sx = 0; sx < S; sx += 1) {
           const px = (x + (sx + 0.5) / S - half) / scale;
           const py = (y + (sy + 0.5) / S - half) / scale + CENTER_Y;
-          const color = sampleColor(px, py);
+          const color = sampleColor(px, py, gray);
           if (color === null) continue;
           r += color[0];
           g += color[1];
@@ -175,8 +190,11 @@ function encodePng(size, pixels) {
 }
 
 await mkdir(outDir, { recursive: true });
-for (const size of SIZES) {
-  const file = resolve(outDir, `icon-${size}.png`);
-  await writeFile(file, encodePng(size, renderRgba(size)));
-  console.log(`wrote ${file}`);
+for (const gray of [false, true]) {
+  for (const size of SIZES) {
+    // 文件名与 src/core/icon-files.ts 里的路径一一对应，改名两头一起改。
+    const file = resolve(outDir, gray ? `icon-gray-${size}.png` : `icon-${size}.png`);
+    await writeFile(file, encodePng(size, renderRgba(size, gray)));
+    console.log(`wrote ${file}`);
+  }
 }
