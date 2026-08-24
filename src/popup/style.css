@@ -1,62 +1,287 @@
-.popup {
-  box-sizing: border-box;
-  width: 280px;
-  padding: 14px;
-  font: 13px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif;
+/*
+ * 配色取美团黄 #FFD100。铺底的米黄不是通用的米色，而是把这支黄降饱和提亮得来的，
+ * 好让底色与主色是同一支颜色的两个明度，而不是黄色配了一层不相干的米。
+ *
+ * 字体一律走系统栈：这是个隐私扩展，为了好看去 Google Fonts 拉一个字体，
+ * 等于 popup 每次打开都向第三方发一次请求——那是自相矛盾的。
+ * 层级因此全靠字重、字号与字距拉开，不靠换字体。
+ */
+:root {
+  color-scheme: light dark;
+
+  --mt-yellow: #ffd100;
+  --mt-yellow-press: #eec000;
+
+  --cream: #fff8e3;
+  --card: #ffffff;
+  --edge: #f2e4bb;
+
+  --ink: #1b1d21;
+  --ink-2: #6b6f76;
+  --ink-3: #9aa0a8;
+
+  --track: #dbdee3;
+  --ok: #0e9f6e;
+
+  /* 警告条是通栏实心红：米黄底会吃掉淡红底的对比度，只有实心色块压得住。 */
+  --danger-bg: #d92d20;
+  --danger-ink: #ffffff;
+
+  --radius: 11px;
 }
 
-.row {
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 深色也保持暖调（底色带一点黄的余温），否则整支品牌色会显得是贴上去的。 */
+    --cream: #191712;
+    --card: #232019;
+    --edge: #343024;
+
+    --ink: #f2f0ea;
+    --ink-2: #a9a59b;
+    --ink-3: #7e7a71;
+
+    --track: #3d3931;
+    --ok: #34d399;
+
+    --danger-bg: #c8342a;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font: 13px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.popup {
+  box-sizing: border-box;
+  width: 320px;
+  padding-bottom: 12px;
+}
+
+/* ---------- 品牌栏 ---------- */
+
+.brand {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 10px;
-  cursor: pointer;
+  padding: 12px 14px 10px;
 }
 
-.site {
-  padding: 10px;
-  margin: 12px 0;
-  background: rgba(127, 127, 127, 0.12);
+.brand-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  background: var(--mt-yellow);
   border-radius: 6px;
 }
 
+.brand-mark svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  color: #1b1d21; /* 黄底上只能压近黑字：白字对比度不足 2:1。 */
+}
+
+.brand-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+}
+
+/* ---------- 卡片 ---------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+
+.site {
+  padding: 12px;
+}
+
+.site-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* 状态标记：与工具栏图标同一个禁止符，拦截时实心黄、放行时空心灰。
+   形状本身就区分了状态，不单靠颜色——色觉障碍下同样读得出来。 */
+.mark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+}
+
+.site-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .host {
-  margin: 0 0 4px;
-  font-weight: 600;
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
 
 .state {
-  margin: 0 0 8px;
+  margin: 2px 0 0;
   font-size: 12px;
+  font-weight: 600;
 }
 
-.state-blocked { color: #c0392b; }
-.state-allowed { color: #1e8449; }
+/* 「已拦截」是这个扩展的正常工作状态，配绿色；
+   「已放行」不是错误，只是没在保护，配中性灰。原先的红绿是反的。 */
+.state-blocked { color: var(--ok); }
+.state-allowed { color: var(--ink-3); }
+
+.count {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.count strong {
+  font-weight: 650;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 主操作 ---------- */
 
 .site button {
   width: 100%;
-  padding: 6px;
+  height: 36px;
+  margin-top: 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  color: #1b1d21;
+  cursor: pointer;
+  background: var(--mt-yellow);
+  border: 0;
+  border-radius: 8px;
+  transition: background 0.15s, transform 0.06s;
+}
+
+.site button:hover { background: var(--mt-yellow-press); }
+.site button:active { transform: scale(0.985); }
+
+/* ---------- 开关 ---------- */
+
+.switches {
+  padding: 2px 12px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
   cursor: pointer;
 }
 
-.count {
-  margin: 0;
-  font-size: 12px;
-  opacity: 0.75;
+.row + .row {
+  border-top: 1px solid var(--edge);
 }
 
-/* 「扩展没有在保护你」的状态，配色要压过界面上其它一切。 */
+.row-label {
+  flex: 1;
+}
+
+/* 输入框只是隐藏了外观，仍在无障碍树与 Tab 序列里。 */
+.row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  background: var(--track);
+  border-radius: 999px;
+  transition: background 0.18s;
+}
+
+.switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  content: "";
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+  transition: transform 0.18s;
+}
+
+.row input:checked + .switch { background: var(--mt-yellow); }
+.row input:checked + .switch::after { transform: translateX(16px); }
+
+.row input:focus-visible + .switch,
+.site button:focus-visible {
+  outline: 2px solid var(--mt-yellow-press);
+  outline-offset: 2px;
+}
+
+/* ---------- 警告 ---------- */
+
+/*「扩展没有在保护你」的状态，配色要压过界面上其它一切。
+   通栏实心红：不缩进、不留米黄边距，让它成为整个 popup 唯一的色块中断。 */
 .warning {
-  padding: 8px 10px;
-  margin: 0 0 12px;
+  display: flex;
+  gap: 7px;
+  padding: 9px 14px;
+  margin: 0 0 10px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.5;
-  color: #7f1d1d;
-  background: #fdecea;
-  border: 1px solid #c0392b;
-  border-left-width: 4px;
-  border-radius: 4px;
+  color: var(--danger-ink);
+  background: var(--danger-bg);
   overflow-wrap: anywhere;
+}
+
+.warning + .warning {
+  margin-top: -10px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 25%);
+}
+
+.loading {
+  padding: 2px 14px 8px;
+  margin: 0;
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site button,
+  .switch,
+  .switch::after {
+    transition: none;
+  }
 }
