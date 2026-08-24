@@ -13,12 +13,23 @@ export interface PopupApi {
   getSyncError(): Promise<string | null>;
 }
 
-/** 品牌栏里的禁止符，与 scripts/make-icons.mjs 画的工具栏图标是同一个图形。 */
+/**
+ * 品牌栏里的图形：两个对等节点连成一条线，被一道 45° 斜杠切断。
+ * 与 scripts/make-icons.mjs 画的工具栏图标是同一组几何，坐标按 viewBox 24 换算——
+ * 节点距中心 0.40、半径 0.105、连线半宽 0.042、断口 0.105、斜杠半长 0.36 半宽 0.058。
+ * 那边改了比例，这里要跟着换算，否则工具栏和 popup 会显示成两个不一样的标志。
+ */
 function BrandGlyph() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
-      <circle cx="12" cy="12" r="8" />
-      <line x1="6.3" y1="17.7" x2="17.7" y2="6.3" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="5.21" cy="18.79" r="2.52" fill="currentColor" />
+      <circle cx="18.79" cy="5.21" r="2.52" fill="currentColor" />
+      <path
+        d="M5.21 18.79L10.22 13.78M13.78 10.22L18.79 5.21"
+        strokeWidth="2.02"
+        strokeLinecap="round"
+      />
+      <path d="M5.89 5.89L18.11 18.11" strokeWidth="2.78" />
     </svg>
   );
 }

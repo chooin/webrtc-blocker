@@ -1,6 +1,6 @@
 // 生成 src/icons/icon-{16,32,48,128}.png。
 //
-// 不引入任何图形库：图标是四个固定尺寸的纯色圆角方块加一个禁止符号，
+// 不引入任何图形库：图标是四个固定尺寸的纯色圆角方块加一个「被切断的对等连接」，
 // 用 zlib 手写一份最小合法 PNG 比拉一个依赖便宜得多，而且结果可复现。
 // 产物已提交进仓库，改动图形时手动跑 `node scripts/make-icons.mjs` 重新生成。
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -23,9 +23,17 @@ function roundedRect(px, py, half, radius) {
   return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - radius;
 }
 
-/** 圆环。 */
-function ring(px, py, radius, halfThickness) {
-  return Math.abs(Math.hypot(px, py) - radius) - halfThickness;
+/** 实心圆。 */
+function circle(px, py, cx, cy, radius) {
+  return Math.hypot(px - cx, py - cy) - radius;
+}
+
+/** 胶囊：从 a 到 b 的线段外扩 halfWidth，两端是圆头。 */
+function capsule(px, py, ax, ay, bx, by, halfWidth) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.min(Math.max(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy), 0), 1);
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy)) - halfWidth;
 }
 
 /** 45° 斜杠：把坐标转回轴对齐后按矩形算。 */
@@ -36,13 +44,36 @@ function slash(px, py, halfLength, halfWidth) {
   return Math.max(Math.abs(rx) - halfLength, Math.abs(ry) - halfWidth);
 }
 
+/*
+ * 图形：两个对等节点连成一条线，被一道 45° 斜杠切断。
+ *
+ * 连线走 ↗ 对角线、斜杠走 ↘ 对角线，两者正交——这是这块画布上能给到的最大角度差。
+ * 之前把连线放在水平方向试过，与斜杠只差 45°，16px 上两条线糊成一团分不出谁是谁。
+ * 节点也因此能沿对角线放到更外面：正方形的对角比水平方向长 41%，那段余量本来是浪费的。
+ *
+ * 连线不画成整条再挖背景色，而是直接画成断开的两截——几何结果一样，
+ * 但不需要「背景色」这个概念，App.tsx 里的 SVG 版才能照抄同一组坐标。
+ * 所有长度都按 size 取比例，四个尺寸出来的是同一个图形，不是四张各画各的。
+ */
+const NODE_DISTANCE = 0.4; // 节点圆心沿 ↗ 对角线到中心的距离
+const NODE_RADIUS = 0.105;
+const LINK_HALF_WIDTH = 0.042;
+const LINK_INNER = 0.105; // 连线内端到中心的距离：正好给斜杠让出断口
+const SLASH_HALF_LENGTH = 0.36;
+const SLASH_HALF_WIDTH = 0.058;
+
 /** 每像素 8×8 超采样，纯手工抗锯齿。 */
 function renderRgba(size) {
   const S = 8;
   const half = size / 2;
   const radius = size * 0.22;
-  const ringRadius = size * 0.32;
-  const stroke = Math.max(size * 0.095, 1) / 2;
+  // ↗ 方向上的单位分量：y 轴向下，所以往右上走是 x 加、y 减。
+  const nodeX = size * NODE_DISTANCE * Math.SQRT1_2;
+  const linkX = size * LINK_INNER * Math.SQRT1_2;
+  const nodeRadius = size * NODE_RADIUS;
+  const linkHalfWidth = size * LINK_HALF_WIDTH;
+  const slashHalfLength = size * SLASH_HALF_LENGTH;
+  const slashHalfWidth = size * SLASH_HALF_WIDTH;
   const pixels = Buffer.alloc(size * size * 4);
 
   for (let y = 0; y < size; y += 1) {
@@ -55,8 +86,11 @@ function renderRgba(size) {
           const py = y + (sy + 0.5) / S - half;
           if (roundedRect(px, py, half, radius) < 0) bgHits += 1;
           const inMark =
-            ring(px, py, ringRadius, stroke) < 0 ||
-            slash(px, py, ringRadius + stroke, stroke) < 0;
+            circle(px, py, -nodeX, nodeX, nodeRadius) < 0 ||
+            circle(px, py, nodeX, -nodeX, nodeRadius) < 0 ||
+            capsule(px, py, -nodeX, nodeX, -linkX, linkX, linkHalfWidth) < 0 ||
+            capsule(px, py, linkX, -linkX, nodeX, -nodeX, linkHalfWidth) < 0 ||
+            slash(px, py, slashHalfLength, slashHalfWidth) < 0;
           if (inMark) fgHits += 1;
         }
       }
