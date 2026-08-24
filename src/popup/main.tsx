@@ -1,10 +1,10 @@
 import { createRoot } from 'react-dom/client';
 import { readCount } from '../background/counter';
+import { pageHost } from '../core/page-host';
 import { createSyncRequest, isSyncResult } from '../shared/messages';
 import { getSettings, saveSettings } from '../shared/settings';
 import { readSyncError } from '../shared/sync-error';
 import { App, type PopupApi } from './App';
-import { pageHost } from './host';
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

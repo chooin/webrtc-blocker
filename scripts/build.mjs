@@ -18,6 +18,7 @@ const importTs = (relative) => import(pathToFileURL(resolve(root, relative)).hre
 // 从它们读路径而不是在这里重抄一遍，是这份构建脚本与运行时不会各说各话的唯一保证。
 const { manifest } = await importTs('src/manifest.ts');
 const { RTC_SCRIPT_FILE, MEDIA_SCRIPT_FILE } = await importTs('src/core/script-files.ts');
+const { COLOR_ICON_FILES, GRAY_ICON_FILES } = await importTs('src/core/icon-files.ts');
 
 // Rollup 的 iife 格式不允许多入口（"IIFE output formats are not supported for
 // code-splitting builds"），而 content script 又必须是自包含单文件，
@@ -114,7 +115,8 @@ async function buildIife({ entry, out }) {
 }
 
 /**
- * 扩展会去加载哪些文件，是散落在 manifest.ts 与 core/script-files.ts 里的字符串。
+ * 扩展会去加载哪些文件，是散落在 manifest.ts、core/script-files.ts 与
+ * core/icon-files.ts 里的字符串。
  * 名字一改而构建产物没跟上，Chrome 只会在运行时抛
  * "Could not load javascript ... for content script"——而且是静默的。
  * 构建期把它们逐个落地核对一遍，几乎不要钱，却能把这类错误挡在发布之前。
@@ -128,6 +130,10 @@ async function assertArtifacts() {
     ...manifest.content_scripts.flatMap((entry) => entry.js),
     RTC_SCRIPT_FILE,
     MEDIA_SCRIPT_FILE,
+    // 灰度图标不在 manifest 里——它们是运行时用 chrome.action.setIcon 换上去的，
+    // 少了这一条，改个文件名只会在用户关掉开关的那一刻静默失败。
+    ...Object.values(COLOR_ICON_FILES),
+    ...Object.values(GRAY_ICON_FILES),
   ];
 
   const missing = [];

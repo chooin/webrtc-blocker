@@ -1,4 +1,4 @@
-import { normalizeHost } from '../core/whitelist';
+import { normalizeHost } from './whitelist';
 
 /**
  * 只有真正能被注入的页面才配拥有站点卡片。

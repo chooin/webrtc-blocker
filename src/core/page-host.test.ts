@@ -1,5 +1,5 @@
 import { normalizeHost } from '../core/whitelist';
-import { pageHost } from './host';
+import { pageHost } from './page-host';
 
 describe('pageHost', () => {
   it('http / https 页面给出域名', () => {
