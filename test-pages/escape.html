@@ -2,6 +2,32 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
+    <script>
+      /*
+       * 必须保持为本文档的第一个脚本。
+       *
+       * 它检验的是「注入脚本有没有赶在页面自己的第一行代码之前」——也就是
+       * 「页面加载即被拦」这条要求真正说的那一刻。页面末尾那次顶层探测只能证明
+       * 补丁最终在位，证明不了它赢了这场竞速：中间隔着整个文档的解析过程。
+       *
+       * 此处刻意不复用下面的 classifyConstructorAttempt：那个函数在本脚本之后才定义。
+       */
+      window.__firstScriptProbe = (function () {
+        try {
+          var PC = window.RTCPeerConnection;
+          if (typeof PC !== 'function') {
+            return { blocked: true, detail: '构造函数不可用' };
+          }
+          var pc = new PC();
+          if (pc && typeof pc.close === 'function') {
+            try { pc.close(); } catch (e) {}
+          }
+          return { blocked: false };
+        } catch (error) {
+          return { blocked: true, detail: error.name };
+        }
+      })();
+    </script>
     <title>WebRTC 逃逸测试</title>
     <style>
       body { font: 14px/1.7 system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
@@ -16,13 +42,14 @@
     <h1>WebRTC 逃逸测试</h1>
 
     <p>
-      本页面探测顶层 window、两种前缀别名、三种 iframe 逃逸路径与
-      <code>getUserMedia</code> 是否已被 WebRTC Blocker 拦截。
-      默认状态下（未把本站加入白名单），前五行 <strong>RTC 探测</strong>应全部显示
+      本页面探测页面第一个脚本执行的时刻、顶层 window、两种前缀别名、四种 iframe 逃逸路径、
+      <code>getUserMedia</code> 与 Web Worker 是否已被 WebRTC Blocker 拦截。
+      默认状态下（未把本站加入白名单），<strong>前七行</strong>应全部显示
       <span class="blocked">已拦截</span>；其中任何一行显示
       <span class="leaked">未拦截</span> 都是漏洞。
-      <strong>最后一行 <code>getUserMedia</code> 是例外</strong>，它默认就应该显示
-      <span class="leaked">未拦截</span>，读法见下方说明。
+      <strong>最后两行是例外</strong>：<code>getUserMedia</code> 默认就应该显示
+      <span class="leaked">未拦截</span>，Web Worker 那行的读法则和其余各行相反，
+      两者的说明都在下方。
     </p>
 
     <div class="note">
@@ -53,6 +80,30 @@
       这一行会无条件显示「已拦截（方法不可用）」——那与扩展是否生效毫无关系。
       README 里给的 <code>python3 -m http.server 8765 -d test-pages</code>
       加 <code>http://localhost:8765/escape.html</code> 正是为此。
+    </div>
+
+    <div class="note">
+      <strong>怎么读「页面的第一个脚本」这一行：</strong>
+      它是本页最要紧的一行。其余各行都在页面加载完之后才探测，
+      只能证明补丁<em>最终</em>在位；而这一行运行在本文档的第一个
+      <code>&lt;script&gt;</code> 里，证明的是补丁<em>赶在了页面自己的代码之前</em>。
+      它显示 <span class="leaked">未拦截</span> 而其余行显示
+      <span class="blocked">已拦截</span>，说明存在一个页面可利用的时间窗口：
+      站点只要在自己的第一行代码里抓走 <code>RTCPeerConnection</code>，之后打的补丁就形同虚设。
+    </div>
+
+    <div class="note">
+      <strong>怎么读「Web Worker 哨兵」这一行——它的读法和其余各行相反：</strong>
+      扩展<em>进不了</em> Worker 的全局作用域，MV3 没有任何机制能往那里注入代码。
+      今天 Worker 里做不了 WebRTC，唯一的原因是浏览器没在那儿暴露
+      <code>RTCPeerConnection</code>（规范里是 <code>[Exposed=Window]</code>），
+      而不是这个扩展拦住了它。
+      <br />
+      所以这一行显示 <span class="blocked">已拦截（RTCPeerConnection=undefined…）</span>
+      是符合预期的现状；一旦它变成 <span class="leaked">未拦截</span>，
+      意味着浏览器开始在 Worker 里提供 WebRTC，而这个扩展会在那条路径上
+      <strong>静默失效</strong>——popup 照常显示「已拦截」。
+      那是需要重新设计的信号，不是一个可以就地修的 bug。
     </div>
 
     <ul id="results"></ul>
@@ -197,6 +248,76 @@
         });
       }
 
+      // 页面可以在 appendChild 之后**同步**读到子文档的全局对象，那一刻 load 事件还没发生。
+      // 上面 probeSameOriginFrame 刻意等了 load（为了避开假阳性），于是这条更早的路径没人测过。
+      // 这里不等：如果此刻读到的还是原生构造函数，说明子 frame 存在一个未打补丁的窗口期。
+      function probeSyncFrameAccess() {
+        const frame = document.createElement('iframe');
+        hideFrame(frame);
+        frame.src = 'about:blank';
+        document.body.appendChild(frame);
+        let outcome;
+        try {
+          const win = frame.contentWindow;
+          outcome = win
+            ? classifyConstructorAttempt(win.RTCPeerConnection)
+            : { undetermined: true, detail: 'contentWindow 此刻还读不到' };
+        } catch (error) {
+          outcome = { undetermined: true, detail: '读取子 frame 时出错：' + error.name };
+        }
+        frame.remove();
+        return outcome;
+      }
+
+      // Worker 这一行是**回归哨兵**，不是拦截测试，读法和其它行相反，见页面上方说明。
+      // 扩展进不了 Worker 的全局作用域——MV3 没有任何机制能往那里注入代码。
+      // 今天不出事的唯一原因是浏览器没在那儿暴露 RTCPeerConnection（规范里是 [Exposed=Window]）。
+      function probeWorker() {
+        return new Promise((resolve) => {
+          const source =
+            "self.onmessage = function () {" +
+            "  self.postMessage({" +
+            "    rtc: typeof self.RTCPeerConnection," +
+            "    channel: typeof self.RTCDataChannel," +
+            "    media: typeof (self.navigator && self.navigator.mediaDevices)" +
+            "  });" +
+            "};";
+
+          let worker;
+          try {
+            const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+            worker = new Worker(url);
+          } catch (error) {
+            resolve({ undetermined: true, detail: '无法创建 Worker：' + error.name });
+            return;
+          }
+
+          let settled = false;
+          const finish = (outcome) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            worker.terminate();
+            resolve(outcome);
+          };
+          const timer = setTimeout(
+            () => finish({ undetermined: true, detail: '3 秒内没有收到 Worker 的回报' }),
+            3000,
+          );
+
+          worker.onerror = () => finish({ undetermined: true, detail: 'Worker 自身报错' });
+          worker.onmessage = (event) => {
+            const d = event.data || {};
+            const detail =
+              'RTCPeerConnection=' + d.rtc +
+              '，RTCDataChannel=' + d.channel +
+              '，mediaDevices=' + d.media;
+            finish({ blocked: d.rtc !== 'function', detail: detail });
+          };
+          worker.postMessage('probe');
+        });
+      }
+
       // getUserMedia 是方法不是构造函数（没有 [[Construct]]）。原生实现 new 不了，
       // 会抛 TypeError，被误判成「已拦截」；扩展补丁是用普通 function 写的、显式 return
       // 一个 Promise，new 它反而不抛错，被误判成「未拦截」——两个方向都反。
@@ -221,10 +342,15 @@
       }
 
       async function main() {
+        await record(
+          '页面的第一个脚本（检验注入有没有赶在页面自己的代码之前）',
+          () => window.__firstScriptProbe,
+        );
         await record('顶层 window', () => classifyConstructorAttempt(window.RTCPeerConnection));
         await record('webkit 前缀别名', () => classifyConstructorAttempt(window.webkitRTCPeerConnection));
         await record('about:blank iframe', () => probeSameOriginFrame((f) => { f.src = 'about:blank'; }));
         await record('srcdoc iframe', () => probeSameOriginFrame((f) => { f.srcdoc = '<p>x</p>'; }));
+        await record('同步读取 about:blank iframe（不等 load 事件）', probeSyncFrameAccess);
         await record(
           'data: URL iframe（探测脚本运行在 data: 文档内部，结果通过 postMessage 回传）',
           probeDataUrlFrame,
@@ -233,6 +359,7 @@
           'getUserMedia（检测是否已被替换为非原生实现；不会真的调用它，避免弹出权限框）',
           () => classifyGetUserMedia(),
         );
+        await record('Web Worker 哨兵（读法相反，见上方说明）', probeWorker);
       }
 
       main();

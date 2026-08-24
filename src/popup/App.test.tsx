@@ -11,9 +11,18 @@ function fakeApi(
   // 大多数用例只关心一个固定值；「保存后同步状态是否变化」这类用例
   // 需要在多次调用间返回不同结果，故也接受一个取值函数。
   syncError: string | null | (() => string | null) = null,
+  // 只有少数用例关心「实测状态」与「同步请求」，单开一个可选对象，
+  // 免得每个既有调用点都要补一串位置参数。
+  extra: {
+    /** 实测这个页面拦没拦住。省略时模拟「页面就是在当前设置下加载的」，即两者一致。 */
+    pageBlocked?: boolean | null;
+    /** popup 主动请求同步时的结果。省略时沿用 syncError。 */
+    requestSync?: () => Promise<string | null>;
+  } = {},
 ) {
   let settings: Settings = { enabled: true, blockMedia: false, whitelist: [], ...overrides };
   const saved: Partial<Settings>[] = [];
+  const reloaded: number[] = [];
   const readSyncError = typeof syncError === 'function' ? syncError : () => syncError;
   const api: PopupApi = {
     getSettings: async () => settings,
@@ -25,8 +34,16 @@ function fakeApi(
     getActiveHost: async () => host,
     getBlockedCount: async () => count,
     getSyncError: async () => readSyncError(),
+    requestSync: extra.requestSync ?? (async () => readSyncError()),
+    isPageBlocked: async () =>
+      extra.pageBlocked === undefined
+        ? settings.enabled && !settings.whitelist.includes(host)
+        : extra.pageBlocked,
+    reloadPage: async () => {
+      reloaded.push(1);
+    },
   };
-  return { api, saved, current: () => settings };
+  return { api, saved, reloaded, current: () => settings };
 }
 
 describe('App', () => {
@@ -175,6 +192,81 @@ describe('App 的失败提示', () => {
     await waitFor(() => expect(screen.queryAllByRole('alert')).not.toHaveLength(0));
     const banner = await screen.findByRole('alert');
     expect(banner.textContent).toContain('持续存在的失败');
+  });
+
+  it('设置说要拦、但这个页面实测没被拦时，如实说需要重新加载', async () => {
+    // 补丁只在文档加载时进入页面，没有追溯力：刚装上扩展、刚把开关拨回开、
+    // 刚把域名移出白名单时，当前这个已经加载完的页面里根本没有补丁。
+    // 此前 popup 照着设置显示「已拦截」，这正是最坏的那种状态。
+    const { api } = fakeApi({}, 'example.com', 0, null, { pageBlocked: false });
+    render(<App api={api} />);
+    expect(await screen.findByText('需重新加载')).toBeTruthy();
+    expect(screen.queryByText('已拦截')).toBeNull();
+  });
+
+  it('反过来也一样：设置已放行、页面却还拦着，同样提示重新加载', async () => {
+    const { api } = fakeApi({ whitelist: ['example.com'] }, 'example.com', 0, null, {
+      pageBlocked: true,
+    });
+    render(<App api={api} />);
+    expect(await screen.findByText('需重新加载')).toBeTruthy();
+    expect(screen.queryByText('已放行')).toBeNull();
+  });
+
+  it('实测还没回来时显示「检测中…」——「无法确认」是要用户警觉的状态，不能当加载占位符', async () => {
+    let settle: (value: boolean | null) => void = () => {};
+    const { api } = fakeApi();
+    const slow: PopupApi = {
+      ...api,
+      isPageBlocked: () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    };
+    render(<App api={slow} />);
+    expect(await screen.findByText('检测中…')).toBeTruthy();
+    expect(screen.queryByText('无法确认')).toBeNull();
+    settle(true);
+    expect(await screen.findByText('已拦截')).toBeTruthy();
+  });
+
+  it('实测不出结果时显示「无法确认」，不许谎称已拦截', async () => {
+    const { api } = fakeApi({}, 'example.com', 0, null, { pageBlocked: null });
+    render(<App api={api} />);
+    expect(await screen.findByText('无法确认')).toBeTruthy();
+    expect(screen.queryByText('已拦截')).toBeNull();
+  });
+
+  it('点「重新加载」会真的重新加载当前页', async () => {
+    const { api, reloaded } = fakeApi({}, 'example.com', 0, null, { pageBlocked: false });
+    render(<App api={api} />);
+    await userEvent.click(await screen.findByText('重新加载'));
+    await waitFor(() => expect(reloaded).toHaveLength(1));
+  });
+
+  it('保存后的横幅依据的是这次同步的结果，而不是 session 里上一次的记录', async () => {
+    // 这是修掉的那个竞态：storage.onChanged 触发的同步是浮动 Promise，
+    // popup 保存完立刻读 session 读到的是上一次的结果（这里是 null），
+    // 于是「这次改动恰好把注册搞坏」时红条不会出现。
+    const { api } = fakeApi({}, 'example.com', 0, null, {
+      requestSync: async () => '注册被拒绝：非法的 match pattern',
+    });
+    render(<App api={api} />);
+    await userEvent.click(await screen.findByLabelText('同时拦截摄像头与麦克风'));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('非法的 match pattern');
+  });
+
+  it('同步请求送不到 Service Worker 时说「无法确认」，不当作没问题', async () => {
+    const { api } = fakeApi({}, 'example.com', 0, null, {
+      requestSync: async () => {
+        throw new Error('接收端不存在');
+      },
+    });
+    render(<App api={api} />);
+    await userEvent.click(await screen.findByLabelText('同时拦截摄像头与麦克风'));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('无法确认拦截是否生效');
   });
 
   it('getSyncError 读取失败不会连累整个弹窗：设置界面照常渲染', async () => {
