@@ -294,6 +294,7 @@ export function App({ api }: { api: PopupApi }) {
 
             <button
               type="button"
+              className="site-action"
               onClick={() =>
                 void update({
                   whitelist: isWhitelisted(host, settings.whitelist)
