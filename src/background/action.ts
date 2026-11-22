@@ -56,10 +56,10 @@ export async function refreshAction(
   deps: ActionDeps,
 ): Promise<void> {
   const { text, color } = appearance(state, count);
-  await deps.action.setIcon({
-    tabId,
-    path: state === 'blocking' ? { ...COLOR_ICON_FILES } : { ...GRAY_ICON_FILES },
-  });
+  const files = state === 'blocking' ? COLOR_ICON_FILES : GRAY_ICON_FILES;
+  // setIcon 在 Service Worker 中用 fetch 取图，开头的 / 让路径从扩展根目录解析。
+  const path = Object.fromEntries(Object.entries(files).map(([size, file]) => [size, `/${file}`]));
+  await deps.action.setIcon({ tabId, path });
   await deps.action.setBadgeBackgroundColor({ tabId, color });
   await deps.action.setBadgeText({ tabId, text });
 }
