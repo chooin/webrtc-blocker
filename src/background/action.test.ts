@@ -1,12 +1,22 @@
 import { badgeText, refreshAction } from './action';
 import { COLOR_ICON_FILES, GRAY_ICON_FILES } from '../core/icon-files';
+import { manifest } from '../manifest';
+
+const extensionRoot = 'chrome-extension://test/';
+const workerUrl = new URL(manifest.background.service_worker, extensionRoot);
 
 function fakeAction() {
   const calls: { icon?: Record<number, string>; color?: string; text?: string } = {};
   const order: string[] = [];
   const action = {
     setIcon: async (d: { path: Record<number, string> }) => {
-      calls.icon = d.path;
+      // 和 Chrome 一样从后台脚本的 URL 解析路径，再与扩展包内的文件名核对。
+      calls.icon = Object.fromEntries(
+        Object.entries(d.path).map(([size, path]) => [
+          size,
+          new URL(path, workerUrl).href.replace(extensionRoot, ''),
+        ]),
+      );
       order.push('icon');
     },
     setBadgeBackgroundColor: async (d: { color: string }) => {
